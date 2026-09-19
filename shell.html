@@ -128,32 +128,63 @@
     clip-path:polygon(5px 0,100% 0,calc(100% - 5px) 100%,0 100%)}
 </style>
 <div class="wrap" id="app"></div>
-
 <style>
-  /* ---------- 공장 전경 ---------- */
-  .plantwrap{position:relative;width:100%;max-width:700px;margin:0 auto;aspect-ratio:1/1;
-    overflow:hidden;background:#ccd9e4;border:2px solid var(--ink);user-select:none}
-  .plbase{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
-  .pl{position:absolute;transform:translate(-50%,-100%);display:block}
-  .pltag{position:absolute;transform:translate(-50%,0);z-index:90;white-space:nowrap;
-    background:var(--panel);border:2px solid var(--ink);padding:1px 9px;
-    font-size:13px;font-weight:800;color:var(--ink);font-variant-numeric:tabular-nums;
-    box-shadow:2px 2px 0 rgba(30,38,43,.4)}
-  .pltag.on{background:var(--teal);color:#fff}
-  .pltag.hot{background:var(--rust);color:#fff}
-  .pltag.off{background:var(--panel2);color:var(--dim)}
-  .pltag.bad{background:var(--rust);color:#fff}
-  .pltag.wip{background:var(--ochre);color:var(--ink)}
-  @media(max-width:560px){ .pltag{font-size:11px;padding:0 6px;border-width:1.5px} }
+  /* ---------- 픽셀 아트 공통 ---------- */
+  .halls img, .lines img, .rack img, .facepic, .crew-pic img, .vwho img{
+    image-rendering:pixelated; image-rendering:crisp-edges}
 
-  .plantbar{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;
-    max-width:700px;margin:14px auto 2px}
-  .pstat{display:flex;align-items:baseline;gap:7px;background:var(--panel2);
-    border:2px solid var(--ink);padding:5px 13px;box-shadow:3px 3px 0 var(--shade)}
-  .pstat i{font-style:normal;font-size:12.5px;color:var(--dim);font-weight:700}
-  .pstat b{font-size:16px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
-  .pstat.bad{background:var(--rust-l)}
-  .pstat.bad b{color:var(--rust)}
+  /* ---------- 공장동 ---------- */
+  .halls{display:flex;flex-direction:column;gap:10px;align-items:center}
+  .hall{position:relative;width:100%;max-width:300px;background:var(--panel2);
+    border:2px solid var(--ink);box-shadow:3px 3px 0 var(--shade)}
+  .hallimg{display:block;width:100%;height:auto}
+  .hallcrane{position:absolute;left:50%;top:27%;width:30%;transform:translateX(-50%);display:block}
+  .halltag{position:absolute;left:6px;top:6px;background:var(--ink);color:var(--panel);
+    padding:1px 8px;font-size:12px;font-weight:800}
+  .hallfoot{font-size:13.5px;font-weight:700;color:var(--dim);text-align:center;margin-top:2px}
+
+  /* ---------- 설비: 위에서 아래로 ---------- */
+  .lines{display:flex;flex-direction:column;gap:9px}
+  .lrow{display:flex;align-items:center;gap:11px;border:2px solid var(--ink);
+    background:var(--panel2);padding:7px 11px 7px 7px;box-shadow:3px 3px 0 var(--shade)}
+  .lrow img{width:76px;height:76px;flex:0 0 76px;object-fit:contain;display:block}
+  .lrow .ph{width:76px;height:76px;flex:0 0 76px;display:grid;place-items:center;
+    border:2px dashed var(--line);color:var(--dim);font-size:12px;font-weight:700}
+  .lrow .linfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .lrow .ltop{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .lrow b{font-size:15.5px;font-weight:800;letter-spacing:-.02em}
+  .lrow i{font-style:normal;font-size:12.5px;font-weight:800;padding:1px 9px;
+    border:1.5px solid var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .lrow i.on{background:var(--teal-l);color:var(--teal)}
+  .lrow i.hot{background:var(--rust-l);color:var(--rust)}
+  .lrow i.off{background:var(--panel);color:var(--dim)}
+  .lrow i.wip{background:var(--ochre-l);color:#8a6410}
+  .lrow .track{height:10px}
+  .lrow .sub{font-size:12px;color:var(--dim);font-weight:600;font-variant-numeric:tabular-nums}
+  .lrow.idle img{filter:grayscale(.8) opacity(.6)}
+  .lrow.empty,.lrow.wip{background:var(--panel)}
+
+  /* ---------- 야드 진열 ---------- */
+  .rack{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+  .cell{border:2px solid var(--ink);background:var(--panel2);padding:8px 8px 9px;text-align:center;
+    box-shadow:3px 3px 0 var(--shade);display:flex;flex-direction:column;align-items:center;gap:2px}
+  .cell img{width:100%;max-width:110px;height:auto;display:block;margin-bottom:2px}
+  .cell .ph{width:100%;max-width:110px;aspect-ratio:1/1;display:grid;place-items:center;
+    border:2px dashed var(--line);color:var(--dim);font-size:12.5px;font-weight:700;margin-bottom:2px}
+  .cell b{font-size:14.5px;font-weight:800;letter-spacing:-.02em;line-height:1.3}
+  .cell i{font-style:normal;font-size:12.5px;font-weight:800;padding:1px 9px;
+    border:1.5px solid var(--ink);font-variant-numeric:tabular-nums}
+  .cell i.on{background:var(--teal-l);color:var(--teal)}
+  .cell i.off{background:var(--panel);color:var(--dim)}
+  .cell i.off.bad{background:var(--rust-l);color:var(--rust);border-color:var(--rust)}
+  .cell .sub{font-size:11.5px;color:var(--dim);line-height:1.35;font-weight:600}
+  .cell.bad{background:var(--rust-l);border-color:var(--rust)}
+  @media(max-width:560px){
+    .rack{grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+    .cell b{font-size:13px} .cell .sub{font-size:11px}
+    .lrow img,.lrow .ph{width:62px;height:62px;flex-basis:62px}
+    .lrow b{font-size:14px}
+  }
 </style>
 
 <style>

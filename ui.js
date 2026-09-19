@@ -22,7 +22,7 @@ const CAST = {
 function face(p) {
   const m = typeof p === 'string' ? CAST[p] : p;
   if (!m) return '';
-  return m.img ? `<img class="facepic" src="art/${m.img}.jpg" alt="">` : m.face;
+  return m.img ? `<img class="facepic" src="${A(m.img + `.png`)}" alt="">` : m.face;
 }
 
 /* 출발 조건은 모두 같다. 국가·설비·자본금이 다르면 성적 차이가 판단의 차이인지
@@ -183,7 +183,7 @@ function fxChips(list) {
 /* 직원 얼굴 + 명패 + 말 */
 function crewBlock(who) {
   const pic = who.img
-    ? `<img src="art/${who.img}.jpg" alt="">`
+    ? `<img src="${A(who.img + `.png`)}" alt="">`
     : `<div class="emoji">${who.face}</div>`;
   return `<div class="crew-pic">${pic}
     <div class="crew-plate"><b>${who.name}</b><i>${who.role}</i></div></div>`;
@@ -226,7 +226,7 @@ function openDecisions() {
     if (msg) G.resultLines = (G.resultLines || []).concat(msg);
 
     const last = G.qi + 1 >= G.queue.length;
-    const pic = who.img ? `<img src="art/${who.img}.jpg" alt="">`
+    const pic = who.img ? `<img src="${A(who.img + `.png`)}" alt="">`
                         : `<div class="em">${who.face}</div>`;
     dlg.innerHTML = `<div class="dlg">${head}
       <div class="verdict">
@@ -335,111 +335,121 @@ function buildDecision(s, ui) {
    공장 그림
    ============================================================ */
 /* ============================================================
-   공장 전경 — 레이어 이미지 합성
-   각 스프라이트는 컨테이너 대비 %로 배치한다. 기준점은 밑변 가운데,
-   즉 "물건이 바닥에 닿는 지점"이다. 그래야 크기를 바꿔도 안 뜬다.
+   공장 화면 — 셋으로 나눠 본다.
+     위    부지 전경 (공장동이 몇 동인가)
+     왼쪽  공장 내부 설비 현황 (뭐가 돌고 뭐가 섰나)
+     오른쪽 야드 현황 (소재·제품·장기재고가 얼마나 쌓였나)
+   전부 256px 픽셀 아트라 확대할 때 뭉개지지 않게 pixelated로 그린다.
    ============================================================ */
+/* 그림 주소. build 때 assets.js가 있으면 index.html 안에 data URI로 박히고,
+   없으면 art/ 폴더에서 읽는다. 어느 쪽이든 코드는 같다. */
 const ART = 'art/';
+const A = name => (typeof ART_DATA !== 'undefined' && ART_DATA[name]) ? ART_DATA[name] : ART + name;
 
 function pl(file, x, y, w, z, title) {
-  return `<img class="pl" src="${ART}${file}" alt="" draggable="false"`
+  return `<img class="pl" src="${A(file)}" alt="" draggable="false"`
        + (title ? ` title="${title}"` : '')
        + ` style="left:${x}%;top:${y}%;width:${w}%;z-index:${z}">`;
 }
-function plTag(x, y, text, cls) {
-  return `<span class="pltag ${cls || ''}" style="left:${x}%;top:${y}%">${text}</span>`;
+
+/* 공장동 — 부지는 빼고 건물만. 증축하면 같은 동이 하나 더 선다. */
+function hallView(s) {
+  const n = s.buildings || 1;
+  const halls = [];
+  for (let i = 0; i < n; i++) halls.push(`<div class="hall">
+      <img class="hallimg" src="${A('bldg1.png')}" alt="공장동">
+      <img class="hallcrane" src="${A('crane.png')}" alt="">
+      <span class="halltag">${i + 1}동</span>
+    </div>`);
+  return `<div class="halls">${halls.join('')}
+    <div class="hallfoot">공장동 ${n}동 · 라인 ${s.lines.length} / ${CFG.MAX_LINES}
+      ${(s.buildQueue || []).length ? ` · 설치 중 ${(s.buildQueue || []).length}건` : ''}</div></div>`;
 }
 
-/* 라인 종류별 설치 자리. 0·1번은 본동, 2번은 증축동에 들어간다. */
-/* 라인 설치 자리. 아이소메트릭 깊이축을 따라 띄워서 서로 가리지 않게 한다.
-   0·1번은 본동, 2번은 증축동. */
-const SLOT = [
-  { x: 57, y: 36, w: 12, z: 42 },
-  { x: 66, y: 41, w: 12, z: 44 },
-  { x: 28, y: 41, w: 12, z: 36 },
-];
-
-function plantView(s, L) {
-  const c   = L.c;
-  const raw = s.invRaw.reduce((a, l) => a + l.qty, 0);
-  const fg  = s.invFg.reduce((a, l) => a + l.qty, 0);
-  const cap = CFG.WAREHOUSE_CAP_BASE;
-  const over = (raw + fg) > cap;
-
-  const age = inventoryAging(s);
-  const oldTon = age[2].qty + age[3].qty;
-  const afloat = s.poOpen.reduce((a, p) => a + p.qty, 0);
-  const nextEta = s.poOpen.length ? Math.min(...s.poOpen.map(p => p.etaTurn)) : null;
-
-  let h = '';
-
-  /* 공장동. 증축하면 뒤쪽에 한 동이 더 선다. */
-  if ((s.buildings || 1) >= 2) h += pl('bldg2.png', 27, 46, 33, 30);
-  h += pl('bldg1.png', 58, 55, 46, 40);
-
-  /* 설비. 그 달에 투입이 있으면 가동 컷, 없으면 정지 컷. */
-  s.lines.forEach((l, i) => {
-    const slot = SLOT[i] || SLOT[2];
+/* 설비 — 위에서 아래로 한 줄씩. 돌면 컬러, 서면 회색. */
+function lineList(s, L) {
+  const c = L.c;
+  const rows = s.lines.map(l => {
     const used = l.type === 'SLIT'  ? (L.now.SLIT  || 0)
                : l.type === 'LEVEL' ? (L.now.LEVEL || 0)
                : (L.now.TRAP || 0) + (L.now.DIE || 0);
     const room = (l.type === 'SLIT' ? c.SLIT : l.type === 'LEVEL' ? c.LEVEL : c.BLANK)
                || CFG.LINE[l.type].cap;
     const util = Math.max(0, Math.min(1, used / Math.max(1, room)));
-    const on   = used > 0;
+    const on = used > 0, pct = Math.round(util * 100);
     const file = { SLIT: 'slit', LEVEL: 'level', BLANK: 'blank' }[l.type] + (on ? '_on' : '_off') + '.png';
-    h += pl(file, slot.x, slot.y, slot.w, slot.z,
-            `${CFG.LINE[l.type].label} · 가동률 ${Math.round(util * 100)}%`);
-    h += plTag(slot.x, slot.y + 1,
-               `${CFG.LINE[l.type].label} ${Math.round(util * 100)}%`,
-               on ? (util > .92 ? 'hot' : 'on') : 'off');
+    return `<div class="lrow ${on ? '' : 'idle'}">
+      <img src="${A(file)}" alt="">
+      <div class="linfo">
+        <div class="ltop"><b>${CFG.LINE[l.type].label}</b>
+          <i class="${on ? (util > .92 ? 'hot' : 'on') : 'off'}">${on ? `가동 ${pct}%` : '정지'}</i></div>
+        <span class="track"><span class="fill ${util > .92 ? 'over' : ''}" style="width:${pct}%"></span></span>
+        <span class="sub">${fmt(used)} / ${fmt(room)} 톤</span>
+      </div></div>`;
   });
 
-  (s.buildQueue || []).forEach((b, i) => {
-    const slot = SLOT[Math.min(2, s.lines.length + i)];
-    h += plTag(slot.x, slot.y, `${CFG.LINE[b.type].label} 설치 중`, 'wip');
-  });
+  (s.buildQueue || []).forEach(b => rows.push(`<div class="lrow wip">
+    <div class="ph">설치 중</div>
+    <div class="linfo"><div class="ltop"><b>${CFG.LINE[b.type].label}</b>
+      <i class="wip">${dateLabel(b.readyTurn)}부터</i></div>
+      <span class="sub">아직 돈만 나갑니다</span></div></div>`));
 
-  /* 천장 크레인 — 베이 위에 얹히는 정도로만 */
-  h += pl('crane.png', 61, 33, 14, 46);
+  const left = CFG.MAX_LINES - s.lines.length - (s.buildQueue || []).length;
+  for (let i = 0; i < left; i++) rows.push(`<div class="lrow empty">
+    <div class="ph">빈 자리</div>
+    <div class="linfo"><div class="ltop"><b>—</b></div>
+      <span class="sub">증설하면 여기 들어갑니다</span></div></div>`);
 
-  /* 소재 코일. 재고량이 곧 야드 풍경이다. */
-  const tier = raw <= 0 ? null
-             : raw < cap * 0.25 ? { f: 'coil_s.png',    w: 17 }
-             : raw < cap * 0.55 ? { f: 'coil_m.png',    w: 23 }
-             : raw < cap        ? { f: 'coil_l.png',    w: 30 }
-             :                    { f: 'coil_over.png', w: 35 };
-  if (tier) h += pl(tier.f, 31, 53, tier.w, 50, `소재 재고 ${fmt(raw)}톤`);
-  if (over) h += plTag(31, 55, '야드 초과 · 동선이 막혔습니다', 'bad');
+  return `<div class="lines">${rows.join('')}</div>`;
+}
 
-  /* 장기재고. 방수포 덮인 코일은 이 게임의 경고등이다. */
-  if (oldTon > 0) {
-    h += pl('coil_tarp.png', 16, 46, 12, 48, `3개월 넘은 재고 ${fmt(oldTon)}톤`);
-    h += plTag(16, 47.5, `장기 ${fmt(oldTon)}t`, 'bad');
-  }
-
-  /* 제품 */
-  const fgSlit  = s.invFg.filter(l => l.proc !== 'TRAP' && l.proc !== 'DIE').reduce((a, l) => a + l.qty, 0);
+/* 야드 현황 — 재고가 그림 한 장으로 보인다 */
+function yardRack(s) {
+  const raw = s.invRaw.reduce((a, l) => a + l.qty, 0);
+  const fg = s.invFg.reduce((a, l) => a + l.qty, 0);
+  const cap = CFG.WAREHOUSE_CAP_BASE;
+  const over = (raw + fg) > cap;
+  const age = inventoryAging(s);
+  const oldTon = age[2].qty + age[3].qty;
+  const afloat = s.poOpen.reduce((a, p) => a + p.qty, 0);
+  const nextEta = s.poOpen.length ? Math.min(...s.poOpen.map(p => p.etaTurn)) : null;
+  const fgSlit = s.invFg.filter(l => l.proc !== 'TRAP' && l.proc !== 'DIE').reduce((a, l) => a + l.qty, 0);
   const fgBlank = s.invFg.filter(l => l.proc === 'TRAP' || l.proc === 'DIE').reduce((a, l) => a + l.qty, 0);
-  if (fgSlit  > 0) h += pl('fg_slit.png',  50, 59, 12, 52, `가공품 ${fmt(fgSlit)}톤`);
-  if (fgBlank > 0) h += pl('fg_blank.png', 61, 55,  9, 54, `블랭크 ${fmt(fgBlank)}톤`);
 
-  h += pl('scrap.png', 38, 60, 7, 51);
+  const tier = raw <= 0 ? null
+             : raw < cap * 0.25 ? 'coil_s'
+             : raw < cap * 0.55 ? 'coil_m'
+             : raw < cap        ? 'coil_l'
+             :                    'coil_over';
 
-  /* 숫자는 그림 위에 흩뿌리지 않고 아래 한 줄로 모은다. */
-  const stat = (k, v, cls) => `<span class="pstat ${cls || ''}"><i>${k}</i><b>${v}</b></span>`;
-  const bar = [
-    stat('미착', afloat > 0 ? `${fmt(afloat)}t · ${dateLabel(nextEta)}` : '없음'),
-    stat('소재', `${fmt(raw)}t`, over ? 'bad' : ''),
-    stat('제품', `${fmt(fg)}t`),
-    stat('장기', oldTon > 0 ? `${fmt(oldTon)}t` : '없음', oldTon > 0 ? 'bad' : ''),
-  ].join('');
+  const cell = (img, label, val, cls, sub) => `<div class="cell ${cls || ''}">
+    ${img ? `<img src="${A(img + '.png')}" alt="">` : `<div class="ph">없음</div>`}
+    <b>${label}</b><i class="${cls === 'bad' ? 'off bad' : 'on'}">${val}</i>
+    ${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
 
-  return `<div class="plantwrap">
-    <img class="plbase" src="${ART}base.jpg" alt="코일센터 전경">
-    ${h}
-  </div>
-  <div class="plantbar">${bar}</div>`;
+  const cells = [
+    cell(tier, '소재 야드', `${fmt(raw)}t`, over ? 'bad' : '',
+      over ? '한도 초과 · 동선이 막혔습니다' : `창고 한도의 ${Math.round(raw / cap * 100)}%`),
+    cell(afloat > 0 ? 'ship' : null, '미착 (바다 위)', afloat > 0 ? `${fmt(afloat)}t` : '없음', '',
+      afloat > 0 ? `${dateLabel(nextEta)} 첫 배 도착` : '들어올 배가 없습니다'),
+    cell(fgSlit > 0 ? 'fg_slit' : null, '가공 제품', `${fmt(fgSlit)}t`, '', '슬리팅 · 레벨링 · 통코일'),
+    cell(fgBlank > 0 ? 'fg_blank' : null, '블랭크', `${fmt(fgBlank)}t`, '', '프레스 가공품'),
+    cell(oldTon > 0 ? 'coil_tarp' : null, '장기재고', oldTon > 0 ? `${fmt(oldTon)}t` : '없음',
+      oldTon > 0 ? 'bad' : '', '3개월 넘은 것'),
+    cell('scrap', '스크랩', '상시', '', '수율에서 나오는 것'),
+  ];
+
+  return `<div class="card">
+    <h2>야드 · 재고</h2>
+    <div class="rack">${cells.join('')}</div></div>`;
+}
+
+function plantView(s, L) {
+  return `<div class="grid g2">
+      <div class="card"><h2>공장동</h2>${hallView(s)}</div>
+      <div class="card"><h2>설비</h2>${lineList(s, L)}</div>
+    </div>
+    ${yardRack(s)}`;
 }
 
 /* ---------- 렌더 ---------- */
@@ -553,7 +563,7 @@ function renderPlay() {
         `${CFG.LINE[b.type].label} 설치 중 — ${dateLabel(b.readyTurn)}부터 가동`).join(' · ')}</div>` : ''}
     </div>
 
-    <div class="card" style="padding:14px 14px 10px">${plantView(s, L)}</div>
+    ${plantView(s, L)}
 
     <div class="center" style="margin:6px 0 26px">
       <button class="primary" id="go">직원들 들어오라고 하기</button>

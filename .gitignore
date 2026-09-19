@@ -15,3 +15,6 @@ ui-old.js
 art-src/
 coil-center-beta.zip
 .claude/
+
+# 배포용 단일 파일 복사본
+coil-center-beta.html
