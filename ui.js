@@ -10,10 +10,10 @@ const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
 const M = n => (n < 0 ? '−$' : '$') + (Math.abs(n) / 1e6).toFixed(1) + 'M';
 
 const CAST = {
-  seo:  { face: '📋', img: 'cast_seo',  name: '서 대리',   role: '구매' },
-  jung: { face: '📞', img: 'cast_jung', name: '정 과장',   role: '영업' },
+  seo:  { face: '📋', img: 'cast_seo',  name: '서 대리',   role: '구매 · 자재' },
+  jung: { face: '📞', img: 'cast_jung', name: '정 부장',   role: '영업 · 소재 발주' },
   gu:   { face: '🔧', img: 'cast_gu',   name: '구 공장장', role: '생산' },
-  han:  { face: '🧮', img: 'cast_han',  name: '한 대리',   role: '경리' },
+  han:  { face: '🧮', img: 'cast_han',  name: '한 부장',   role: '관리 · 재무·인사·총무' },
   oh:   { face: '🔍', img: 'cast_oh',   name: '오 과장',   role: '품질' },
   lin:  { face: '☕', img: 'cast_lin',  name: '린 매니저', role: '현지' },
 };
@@ -33,12 +33,12 @@ const COUNTRIES = {
 /* 난이도. 하드는 자본도 얇고 물려받은 판매 기반도 작다.
    같은 판단을 해도 실수 한 번의 값이 다르다. */
 const DIFF = {
-  normal: { key:'normal', name:'노멀', equity:65_000_000, share:0.10, debtRate:0.60,
+  normal: { key:'normal', name:'노멀', equity:78_000_000, share:0.10, debtRate:0.60,
     target:45_000_000, trust:65,
-    desc:'자본금 $65M. 본사가 붙여준 판매 기반도 넉넉합니다. 판단을 배우기에 좋습니다.' },
-  hard:   { key:'hard',   name:'하드', equity:55_000_000, share:0.082, debtRate:0.55,
+    desc:'자본금 $78M. 본사가 붙여준 판매 기반도 넉넉합니다. 판단을 배우기에 좋습니다.' },
+  hard:   { key:'hard',   name:'하드', equity:66_000_000, share:0.082, debtRate:0.55,
     target:58_000_000, trust:55,
-    desc:'자본금 $55M. 은행 한도도 좁고 물려받은 고객도 적습니다. 첫 1년을 버티는 것부터 일입니다.' },
+    desc:'자본금 $66M. 은행 한도도 좁고 물려받은 고객도 적습니다. 첫 1년을 버티는 것부터 일입니다.' },
 };
 const SETUP = { country: 'NV', lines: ['SLIT', 'LEVEL'], diff: 'normal' };
 
@@ -68,8 +68,12 @@ function newGame(opt) {
 
   /* 숨은 세계 — 설비·품질·고객 관계·본사 목표. 플레이어는 징후로만 본다. */
   G.W = initWorld(s, D);
-  applyLegacy(s);
-  G.W.snaps.push(snapshot(s, G.W, null));
+
+  /* 이미 돌던 회사를 넘겨받는다 — 전임 사장의 1년을 실제로 돌려서 그 상태로 시작한다 */
+  G.s = runPrelude(G.s);
+  G.s.trust = D.trust; G.s.morale = 70;
+  applyLegacy(G.s);
+  G.W.snaps.push(snapshot(G.s, G.W, G.s.prelude[G.s.prelude.length - 1]));
 
   /* 대형 사건은 판마다 다른 달에, 다른 조합으로 온다.
      지금은 대부분의 사건이 플레이어의 선택에서 나오므로, 외부 충격은 세 건만 둔다. */
@@ -99,7 +103,7 @@ function dealTurn() {
 
   const s = G.s, W = G.W, used = new Set();
   G.before = { rel: { ...W.rel }, equip: W.equip };
-  G.ui.cover = { tight: 0.6, normal: 1.0, ample: 1.6 }[W.policy] ?? 1;
+  G.ui.cover = { tight: 1.4, normal: 2.2, ample: 3.0 }[W.policy] ?? 2.2;
 
   const put = (card) => {
     if (!card) return false;
@@ -245,7 +249,7 @@ function cardCtx(s) {
   return { load, tight: load > 0.97, idle: load < 0.55, pmTrend };
 }
 
-const DECK_LABEL = { buy: '구매', policy: '구매 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', op: '운영', life: '사내', big: '주요 사건' };
+const DECK_LABEL = { mat: '자재', hr: '인사', ga: '총무', buy: '소재 발주', policy: '소재 발주 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', op: '운영', life: '사내', big: '주요 사건' };
 
 /* 매달 영업 인력을 어느 고객군에 붙일지. 결실은 석 달 뒤. */
 function customerCard(s) {
@@ -279,8 +283,9 @@ function look(s) {
     avg[k] = xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
     pot[k] = ps.length ? ps.reduce((a, b) => a + b, 0) / ps.length : 0;
   }
-  const need = Math.min(c.SLIT, avg.SLIT) + Math.min(c.LEVEL, avg.LEVEL)
-             + avg.C2C + Math.min(c.BLANK, (avg.TRAP || 0) + (avg.DIE || 0));
+  // 소재 기준 월 소요량 — 가공은 로스가 나니 제품 톤을 수율로 나눠야 원료 톤이 된다
+  const need = Math.min(c.SLIT, avg.SLIT) / CFG.YIELD.SLIT + Math.min(c.LEVEL, avg.LEVEL) / CFG.YIELD.LEVEL
+             + avg.C2C + Math.min(c.BLANK, (avg.TRAP || 0) + (avg.DIE || 0)) / CFG.YIELD.TRAP;
   const haveP = s.poOpen.concat(s.invRaw, s.invFg)
     .filter(l => (l.gr || 'COMMON') === 'PREMIUM').reduce((a, l) => a + l.qty, 0);
   const isBust = CFG.HQ_SPOT.phases.includes(s.market.phase);
@@ -295,10 +300,15 @@ function buildDecision(s, ui) {
   const gap = L.need * (CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd + ui.cover) - L.haveP;
   const buy = Math.max(0, Math.min(gap, L.need * 1.6)) * (G ? (G.mult || 1) : 1);
   const n = L.now, hasCommon = (s.hqSpotCredit || 0) > 1;
-  const idleS = Math.max(0, L.c.SLIT - (n.SLIT || 0)), idleL = Math.max(0, L.c.LEVEL - (n.LEVEL || 0));
-  const runS = Math.min(L.c.SLIT, (n.SLIT || 0) + (hasCommon ? idleS : 0));
-  const runL = Math.min(L.c.LEVEL, (n.LEVEL || 0) + (hasCommon ? idleL : 0));
-  const runT = Math.min(L.c.BLANK * 0.5, n.TRAP || 0), runD = Math.min(L.c.BLANK * 0.5, n.DIE || 0);
+  /* 가공 제품은 열흘치쯤 들고 있어야 한다. 고객 라인은 JIT로 도는데 우리 라인이 매일 그 순서대로
+     돌 수는 없다. 그래서 이번 달 내시에 목표 제품재고와의 차이를 더해서 돌린다. */
+  const FG_COVER = 0.35;
+  const fgNow = k => s.invFg.filter(l => l.proc === k).reduce((a, l) => a + l.qty, 0);
+  const want = k => Math.max(0, (n[k] || 0) * (1 + FG_COVER) - fgNow(k)) / CFG.YIELD[k];
+  const idleS = Math.max(0, L.c.SLIT - want('SLIT')), idleL = Math.max(0, L.c.LEVEL - want('LEVEL'));
+  const runS = Math.min(L.c.SLIT, want('SLIT') + (hasCommon ? idleS : 0));
+  const runL = Math.min(L.c.LEVEL, want('LEVEL') + (hasCommon ? idleL : 0));
+  const runT = Math.min(L.c.BLANK * 0.5, want('TRAP')), runD = Math.min(L.c.BLANK * 0.5, want('DIE'));
   return {
     buy: { totalTon: buy, alpha: 1, beta: 1, hqSpotTon: ui.hqTake },
     invest: { addLine: ui.expandPick, newBuilding: s.lines.length >= CFG.MAX_LINES,
@@ -308,9 +318,8 @@ function buildDecision(s, ui) {
                trimYield: G && G.trim ? G.trim.options[G.trimPick].yield : 0,
                custFocus: ui.custFocus || null },
     run: { SLIT: runS, LEVEL: runL, TRAP: runT, DIE: runD },
-    // 팔 수 있는 만큼만 만든다. 더 만들면 그대로 창고에 눕는다.
-    sell: { C2C: n.C2C || 0, SLIT: runS * CFG.YIELD.SLIT, LEVEL: runL * CFG.YIELD.LEVEL,
-            TRAP: runT * CFG.YIELD.TRAP, DIE: runD * CFG.YIELD.DIE },
+    // 출하는 이번 달 수요만큼. 제품 창고에서 먼저 나가고, 남는 건 다음 달 안전재고가 된다.
+    sell: { C2C: n.C2C || 0, SLIT: 1e9, LEVEL: 1e9, TRAP: 1e9, DIE: 1e9 },
     _buyTon: buy, _L: L,
   };
 }
@@ -511,32 +520,26 @@ function renderSetup() {
    경영 대시보드 — 이번 달 숫자, 왜 그렇게 됐는지, 앞으로 뭐가 올지
    ============================================================ */
 
-/* 경영현황 — 지난달 대비 화살표. 숨은 값은 말로만 보여준다. */
-function dashPanel(s, W) {
-  const a = W.snaps[W.snaps.length - 1], b = W.snaps[W.snaps.length - 2];
-  if (!a || !b) return '';
-  const tile = (k, v, d, inv, fmtD) => {
-    const dir = d == null || Math.abs(d) < 1e-6 ? '' : d > 0 ? '▲' : '▼';
-    const good = d == null ? '' : (d > 0) !== !!inv ? 'up' : 'dn';
-    return `<div class="dtile"><i>${k}</i><b>${v}</b>${dir ? `<span class="${good}">${dir} ${fmtD(Math.abs(d))}</span>` : '<span class="neu">–</span>'}</div>`;
-  };
-  const relNow = a.rel, relPrev = b.rel;
-  const pace = a.hqPace;
+/* 회사 상태 — 숫자로 안 잡히는 것들. 숨은 값은 말로만 보여준다. */
+function statusPanel(s, W) {
+  const a = W.snaps[W.snaps.length - 1], b = W.snaps[W.snaps.length - 2] || a;
+  let relAvg = 0;
+  for (const k in CUST) relAvg += (s.custShare[k] || 0) * W.rel[k];
+  const m = ((s.turn - 1) % 12);
+  const pace = W.hq.target > 0 && m > 0 ? W.hq.ytd / (W.hq.target * m / 12) : null;
+  const arrow = (d, inv) => d == null || Math.abs(d) < 0.5 ? '<span class="neu">–</span>'
+    : `<span class="${(d > 0) !== !!inv ? 'up' : 'dn'}">${d > 0 ? '▲' : '▼'}</span>`;
+  const tile = (k, v, d, inv) => `<div class="dtile"><i>${k}</i><b>${v}</b>${arrow(d, inv)}</div>`;
   return `<div class="card">
-    <h2>${a.turn > 0 ? dateLabel(Math.max(1, s.turn - 1)) : ''} 경영현황</h2>
+    <h2>회사 상태</h2>
     <div class="dash">
-      ${tile('판매량', `${fmt(a.sales)}t`, a.sales - b.sales, false, v => fmt(v) + 't')}
-      ${tile('영업이익', `${(a.op < 0 ? '−$' : '$') + fmt(Math.abs(a.op) / 1000)}k`, a.op - b.op, false, v => '$' + fmt(v / 1000) + 'k')}
-      ${tile('현금', M(a.cash), a.cash - b.cash, false, v => '$' + (v / 1e6).toFixed(1) + 'M')}
-      ${tile('소재 재고', `${fmt(a.raw)}t`, a.raw - b.raw, true, v => fmt(v) + 't')}
-      ${tile('가동률', `${Math.round(a.util * 100)}%`, (a.util - b.util) * 100, false, v => v.toFixed(0) + '%p')}
-      ${tile('양품률', `${a.quality.toFixed(1)}%`, a.quality - b.quality, false, v => v.toFixed(1) + '%p')}
-      ${tile('설비', equipLabel(a.equip), a.equip - b.equip, false, () => '')}
-      ${tile('고객 관계', relLabel(relNow), relNow - relPrev, false, () => '')}
-      ${tile('본사 신뢰', Math.round(a.trust), a.trust - b.trust, false, v => v.toFixed(0))}
-      ${tile('직원 사기', Math.round(a.morale), a.morale - b.morale, false, v => v.toFixed(0))}
-      ${pace != null ? tile('본사 목표 페이스', `${Math.round(pace * 100)}%`, null, false, () => '') : ''}
-      ${tile('현장', fatigueLabel(W.fatigue), null, false, () => '')}
+      ${tile('설비', equipLabel(W.equip), b ? W.equip - b.equip : null)}
+      ${tile('양품률', `${qualityPct(W.quality).toFixed(1)}%`, b ? (qualityPct(W.quality) - b.quality) * 5 : null)}
+      ${tile('현장', fatigueLabel(W.fatigue), null)}
+      ${tile('고객 관계', relLabel(relAvg), b ? relAvg - b.rel : null)}
+      ${tile('본사 신뢰', Math.round(s.trust), b ? s.trust - b.trust : null)}
+      ${tile('직원 사기', Math.round(s.morale), b ? s.morale - b.morale : null)}
+      ${pace != null ? tile('본사 목표 페이스', `${Math.round(pace * 100)}%`, null) : ''}
     </div></div>`;
 }
 
@@ -616,26 +619,21 @@ function renderPlay() {
   const last = s.history[s.history.length - 1];
 
   app.innerHTML = `
-    <div class="hud">
-      <div class="stat"><div class="k">${s.companyName}</div>
-        <div class="v" style="font-size:16px">${periodNow()}
-          <span class="muted" style="font-size:12px">${periodIndex()}/${periodTotal()}</span></div></div>
-      <div class="stat"><div class="k">시황</div><div class="v" style="font-size:16px">
-        <span class="phase ph-${s.market.phase}">${ph.label}</span></div></div>
-      <div class="stat"><div class="k">소재 시세</div><div class="v">$${fmt(s.market.pm)}</div></div>
-      <div class="stat"><div class="k">통장</div><div class="v ${s.cash < 3e6 ? 'neg' : ''}">${M(s.cash)}</div></div>
-      <div class="stat"><div class="k">은행 빚</div>
-        <div class="v ${s.debt.principal > s.debt.limit * .8 ? 'neg' : ''}">${M(s.debt.principal)}</div></div>
-      <div class="stat"><div class="k">본사 이익 누계</div>
-        <div class="v ${s.hq.cumConsolidated < 0 ? 'neg' : 'pos'}">${M(s.hq.cumConsolidated)}</div></div>
-      <div class="stat"><div class="k">직원 사기</div><div class="v">${Math.round(s.morale)}</div></div>
+    <div class="topbar">
+      <b>${s.companyName}</b>
+      <span>${periodNow()} <i>${periodIndex()} / ${periodTotal()}</i></span>
+      <span class="phase ph-${s.market.phase}">${ph.label}</span>
     </div>
 
     ${yearBanner(s)}
 
+    ${s.turn === 1 && !s.history.length ? takeoverBrief(s) : ''}
+
     ${firedPanel(G.W)}
 
-    ${dashPanel(s, G.W)}
+    ${perfPanel(s)}
+
+    ${statusPanel(s, G.W)}
 
     <div class="grid g2">${impactPanel(G.W) || ''}${warnPanel(s, G.W) || ''}</div>
 
@@ -649,23 +647,36 @@ function renderPlay() {
 
     ${plantView(s, L)}
 
-    ${metricsPanel(s)}
 
     ${custPanel(s)}
 
     <div class="grid g2">
       <div class="card">
-        <h2>이번 달 본사 주문</h2>
+        <h2>수주 현황 — 고객 내시</h2>
+        <p class="hint" style="margin-top:-6px">고객이 석 달 앞까지 확정해 준 물량입니다. 영업이 이걸 보고 소재를 시킵니다.
+          지금 본사 소재 시세 톤당 $${fmt(s.market.pm)}.</p>
+        <h3 class="h3">이번 달 설비 부하</h3>
         ${bars(L.now, L.c)}
-        <table style="margin-top:14px"><tr><th>받아둔 주문</th>${s.nasi.map(x => `<th>${x.turn}월</th>`).join('')}</tr>
-          <tr><td>슬리팅</td>${s.nasi.map(x => `<td>${fmt(x.tons.SLIT)}</td>`).join('')}</tr>
-          <tr><td>레벨링</td>${s.nasi.map(x => `<td>${fmt(x.tons.LEVEL)}</td>`).join('')}</tr>
-          <tr><td>통코일</td>${s.nasi.map(x => `<td>${fmt(x.tons.C2C)}</td>`).join('')}</tr></table>
-        <p class="hint">자동차강판은 석 달 앞까지 물량이 확정됩니다(내시). 이걸 보고 소재를 시킵니다.</p>
-        ${last ? `<div class="note ${last.shortageEvents.length ? 'bad' : 'good'}">지난달 주문
-          ${fmt(Object.values(last.demandAuto).reduce((a, b) => a + b, 0))}톤 중
-          <b>${fmt(Object.values(last.shipped).reduce((a, b) => a + b, 0))}톤 납품</b>
-          ${last.shortageEvents.length ? '· 못 채운 고객이 있습니다' : '· 다 채웠습니다'}</div>` : ''}
+        ${(() => {
+          const mon = t => dateLabel(t).replace(/^\d+년 /, '');
+          const tot = x => Object.values(x.tons).reduce((a, b) => a + b, 0);
+          const hasB = s.nasi.some(x => (x.tons.TRAP || 0) + (x.tons.DIE || 0) > 0);
+          const pr = [['통코일', x => x.tons.C2C], ['슬리팅', x => x.tons.SLIT], ['레벨링', x => x.tons.LEVEL]]
+            .concat(hasB ? [['블랭킹', x => (x.tons.TRAP || 0) + (x.tons.DIE || 0)]] : []);
+          return `<h3 class="h3">공정별 내시 (톤)</h3>
+          <table><tr><th></th>${s.nasi.map(x => `<th>${mon(x.turn)}</th>`).join('')}</tr>
+            ${pr.map(([n, f]) => `<tr><td>${n}</td>${s.nasi.map(x => `<td>${fmt(f(x) || 0)}</td>`).join('')}</tr>`).join('')}
+            <tr class="tot"><td>합계</td>${s.nasi.map(x => `<td>${fmt(tot(x))}</td>`).join('')}</tr></table>
+          <h3 class="h3">고객군별 내시 (톤)</h3>
+          <table><tr><th></th>${s.nasi.map(x => `<th>${mon(x.turn)}</th>`).join('')}<th>비중</th></tr>
+            ${Object.keys(CUST).map(k => `<tr><td>${CUST[k]} · ${CFG.CUSTOMERS[k].name}</td>${s.nasi.map(x =>
+              `<td>${fmt(tot(x) * (s.custShare[k] || 0))}</td>`).join('')}<td>${Math.round((s.custShare[k] || 0) * 100)}%</td></tr>`).join('')}
+          </table>`;
+        })()}
+        ${(() => { const lr = last || (s.prelude || []).slice(-1)[0]; return lr ? `<div class="note ${lr.shortageEvents.length ? 'bad' : 'good'}">지난달 내시
+          ${fmt(Object.values(lr.demandAuto).reduce((a, b) => a + b, 0))}톤 중
+          <b>${fmt(Object.values(lr.shipped).reduce((a, b) => a + b, 0))}톤 납품</b>
+          ${lr.shortageEvents.length ? '· 못 채운 고객이 있습니다' : '· 다 채웠습니다'}</div>` : ''; })()}
       </div>
 
       <div class="card">
@@ -806,49 +817,139 @@ function expandCard(type, L, s) {
   };
 }
 
-/* ---------- 경영지표: 당월 / 누계 / 전월 대비 ---------- */
-function metricsPanel(s) {
-  const h = s.history;
-  // 속성 모드는 석 달을 한 칸으로 묶어 보여준다
-  const n = (G && G.mpt) || 1;
-  const seg = end => { const a = h.slice(Math.max(0, end - n), end); return a.length ? mergeReports(a) : null; };
-  const R = seg(h.length), P = seg(h.length - n);
-  const CUR = n > 1 ? '이번 분기' : '당월', PRV = n > 1 ? '전분기 대비' : '전월 대비';
-  if (!R) return `<div class="card metrics"><h2>경영지표</h2>
-    <p class="hint">${periodNow()} 결산이 끝나면 여기에 실적이 쌓입니다.</p></div>`;
-  const t = v => fmt(v) + 't';
-  // 돈은 전부 천달러(k$)로 통일한다. 단위가 섞이면 비교가 안 된다.
+/* ============================================================
+   경영실적 — 사장이 제일 먼저 보는 표
+   부임 첫 달은 넘겨받은 회사의 작년 연간·월평균·지난달을,
+   그다음부터는 당월(분기)·누계·전월 대비를 보여준다.
+   ============================================================ */
+function perfPanel(s) {
+  const n = (G && G.mpt) || 1, hist = s.history;
+  const T = r => Object.values(r.shipped || {}).reduce((a, b) => a + b, 0);
   const K = v => (v < 0 ? '−$' : '$') + fmt(Math.abs(v) / 1000) + 'k';
-  // inv: 늘어나면 나쁜 지표 (장기재고·지연채권·차입금)
-  const row = (label, cur, cum, prev, f, cls = '', inv = false) => {
-    const d = prev == null ? null : cur - prev;
-    const dc = d == null || Math.abs(d) < 1e-6 ? '' : (d > 0 ? 'up' : 'dn') + (inv ? ' inv' : '');
-    return `<tr class="${cls}"><td>${label}</td><td>${f(cur)}</td>
-      <td>${cum == null ? '' : f(cum)}</td>
-      <td class="${dc}">${d == null ? '—' : Math.abs(d) < 1e-6 ? '–' : (d > 0 ? '▲ ' : '▼ ') + f(Math.abs(d))}</td></tr>`;
-  };
-  const tot = x => x.C2C + x.SLIT + x.LEVEL + x.BLANK;
-  const sp = P ? P.sales : null, bp = P ? P.bs : null;
-  return `<div class="card metrics">
-    <h2>경영지표 · ${n > 1 ? periodLabel(R.firstTurn || R.turn, 3) : R.date}</h2>
+  const tt = v => fmt(v) + 't';
+  const pc = v => (v == null || !isFinite(v) ? '—' : Math.round(v * 100) + '%');
+  const mo = v => (v == null || !isFinite(v) ? '—' : v.toFixed(1) + '개월');
+  const dol = v => (v == null || !isFinite(v) ? '—' : (v < 0 ? '−$' : '$') + Math.abs(v).toFixed(1) + '/t');
+
+  // 줄 정의 — kind: flow(기간 합) · ratio(비율) · bal(월말 잔액)
+  const rows = [];
+  const sec = title => rows.push({ head: title });
+  const row = (label, kind, fn, f, o = {}) => rows.push({ label, kind, fn, f, ...o });
+
+  sec('판매 실적');
+  row('판매량', 'flow', r => T(r), tt, { cls: 'tot' });
+  row('통코일', 'flow', r => (r.shipped || {}).C2C || 0, tt, { cls: 'sub' });
+  row('가공 · 슬리팅', 'flow', r => (r.shipped || {}).SLIT || 0, tt, { cls: 'sub' });
+  row('가공 · 레벨링', 'flow', r => (r.shipped || {}).LEVEL || 0, tt, { cls: 'sub' });
+  if (s.lines.some(l => l.type === 'BLANK') || hist.some(r => ((r.shipped || {}).TRAP || 0) + ((r.shipped || {}).DIE || 0) > 0))
+    row('가공 · 블랭킹', 'flow', r => ((r.shipped || {}).TRAP || 0) + ((r.shipped || {}).DIE || 0), tt, { cls: 'sub' });
+  row('가공 판매 비중', 'ratio', r => { const t = T(r); return t > 0 ? 1 - ((r.shipped || {}).C2C || 0) / t : null; }, pc);
+
+  sec('고객군별 판매');
+  for (const k of Object.keys(CUST)) {
+    row(`${CUST[k]} · ${CFG.CUSTOMERS[k].name}`, 'flow', r => custTonsOf(r)[k] || 0,
+      v => tt(v), { cls: 'sub', share: r => { const t = T(r); return t > 0 ? (custTonsOf(r)[k] || 0) / t : 0; } });
+  }
+
+  sec('손익 (천달러)');
+  row('매출액', 'flow', r => r.revenue, K);
+  row('영업이익', 'flow', r => r.op, K, { cls: 'tot' });
+  row('순이익', 'flow', r => r.np, K);
+  row('톤당 영업이익', 'ratio', r => { const t = T(r); return t > 0 ? r.op / t : null; }, dol);
+
+  sec('설비 가동률');
+  const types = [...new Set(s.lines.map(l => l.type))];
+  for (const ty of types)
+    row(CFG.LINE[ty].label, 'ratio', r => lineUtilOf(r)[ty], pc);
+
+  sec('재고 · 재원 (월말)');
+  row('창고 현물 (소재 + 제품)', 'bal', r => stockOf(r).onhand, tt);
+  row('└ 가공 제품', 'bal', r => stockOf(r).fg, tt, { cls: 'sub' });
+  row('해상 미착', 'bal', r => stockOf(r).sea, tt);
+  row('본사 생산 중', 'bal', r => stockOf(r).prod, tt);
+  row('재고량 (현물 + 미착)', 'bal', r => stockOf(r).inv, tt, { cls: 'tot' });
+  row('재고율', 'bal', r => stockOf(r).invM, mo, { note: '재고량 ÷ 향후 3개월 내시 평균' });
+  row('재원량 (재고 + 생산 중)', 'bal', r => stockOf(r).res, tt, { cls: 'tot' });
+  row('재원율', 'bal', r => stockOf(r).resM, mo, { note: '재원량 ÷ 향후 3개월 내시 평균' });
+  row('장기재고 (3개월 초과)', 'bal', r => (r.bs || {}).longTons || 0, tt, { inv: true });
+
+  sec('자금 (월말 · 천달러)');
+  row('현금', 'bal', r => (r.bs || {}).cash || 0, K);
+  row('매출채권', 'bal', r => (r.bs || {}).ar || 0, K);
+  row('지연채권', 'bal', r => (r.bs || {}).arDelayed || 0, K, { inv: true });
+  row('차입금', 'bal', r => (r.bs || {}).debt || 0, K, { inv: true });
+  row('순운전자본', 'bal', r => (r.bs || {}).nwc || 0, K);
+
+  // 기준이 되는 기간들
+  let title, heads, cell;
+  if (!hist.length) {
+    const P = s.prelude || [], last = P[P.length - 1], Y = mergeReports(P);
+    const avgBal = fn => P.reduce((a, r) => a + (fn(r) || 0), 0) / Math.max(1, P.length);
+    title = `인수 시점 경영실적 · ${(last.date || '').replace(/ \d+월$/, '')}`;
+    heads = [`지난달 (${(last.date || '').replace(/^\d+년 /, '')})`, '작년 월평균', '작년 연간'];
+    cell = r => {
+      if (r.kind === 'flow') return [r.fn(last), r.fn(Y) / P.length, r.fn(Y)].map((v, i) =>
+        r.f(v) + (r.share ? ` <span class="sh">${pc(i === 0 ? r.share(last) : r.share(Y))}</span>` : ''));
+      if (r.kind === 'ratio') return [r.f(r.fn(last)), '', r.f(r.fn(Y))];
+      return [r.f(r.fn(last)), r.f(avgBal(r.fn)), ''];
+    };
+  } else {
+    const cur = mergeReports(hist.slice(-n)), prevL = hist.slice(-2 * n, -n), prev = prevL.length ? mergeReports(prevL) : null;
+    const all = mergeReports(hist);
+    title = `경영실적 · ${n > 1 ? periodLabel(cur.firstTurn || cur.turn, 3) : cur.date}`;
+    heads = [n > 1 ? '이번 분기' : '당월', '부임 후 누계', n > 1 ? '전분기 대비' : '전월 대비'];
+    const delta = (r, v, pv) => {
+      if (pv == null || v == null || !isFinite(v) || !isFinite(pv)) return '<span class="neu">—</span>';
+      const d = v - pv;
+      if (Math.abs(d) < 1e-6) return '<span class="neu">–</span>';
+      const good = (d > 0) !== !!r.inv;
+      const body = r.f === pc ? Math.abs(d * 100).toFixed(1) + '%p' : r.f === mo ? Math.abs(d).toFixed(1) + '개월' : r.f(Math.abs(d));
+      return `<span class="${r.f === mo ? 'neu' : good ? 'up' : 'dn'}">${d > 0 ? '▲' : '▼'} ${body}</span>`;
+    };
+    cell = r => {
+      const v = r.fn(cur), pv = prev ? r.fn(prev) : null;
+      if (r.kind === 'flow') return [r.f(v) + (r.share ? ` <span class="sh">${pc(r.share(cur))}</span>` : ''), r.f(r.fn(all)), delta(r, v, pv)];
+      if (r.kind === 'ratio') return [r.f(v), r.f(r.fn(all)), delta(r, v, pv)];
+      return [r.f(v), '', delta(r, v, pv)];
+    };
+  }
+
+  return `<div class="card metrics perf">
+    <h2>${title}</h2>
     <table>
-      <tr><th>금액 단위 : 천달러 (k$)</th><th>${CUR}</th><th>누계</th><th>${PRV}</th></tr>
-      ${row('판매량', tot(R.sales), tot(R.cum.sales), sp && tot(sp), t, 'tot')}
-      ${row('통코일', R.sales.C2C, R.cum.sales.C2C, sp && sp.C2C, t, 'sub')}
-      ${row('가공 · 슬리팅', R.sales.SLIT, R.cum.sales.SLIT, sp && sp.SLIT, t, 'sub')}
-      ${row('가공 · 레벨러', R.sales.LEVEL, R.cum.sales.LEVEL, sp && sp.LEVEL, t, 'sub')}
-      ${row('가공 · 블랭킹', R.sales.BLANK, R.cum.sales.BLANK, sp && sp.BLANK, t, 'sub')}
-      ${row('매출액', R.revenue, R.cum.revenue, P && P.revenue, K, 'tot')}
-      ${row('영업이익', R.op, R.cum.op, P && P.op, K, 'tot')}
-      ${row('순이익', R.np, R.cum.np, P && P.np, K)}
-      <tr class="head"><th colspan="4">월말 잔액</th></tr>
-      ${row('재고량', R.bs.invTons, null, bp && bp.invTons, t)}
-      ${row('장기재고 (3개월 초과)', R.bs.longTons, null, bp && bp.longTons, t, '', true)}
-      ${row('매출채권', R.bs.ar, null, bp && bp.ar, K)}
-      ${row('지연채권', R.bs.arDelayed, null, bp && bp.arDelayed, K, '', true)}
-      ${row('차입금', R.bs.debt, null, bp && bp.debt, K, '', true)}
-      ${row('순운전자본', R.bs.nwc, null, bp && bp.nwc, K, 'tot')}
+      <tr><th></th>${heads.map(h => `<th>${h}</th>`).join('')}</tr>
+      ${rows.map(r => r.head
+        ? `<tr class="head"><th colspan="4">${r.head}</th></tr>`
+        : `<tr class="${r.cls || ''}"><td>${r.label}${r.note ? `<span class="rn">${r.note}</span>` : ''}</td>${cell(r).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}
     </table></div>`;
+}
+
+/* 부임 첫 달 — 관리부장이 작년 실적을 브리핑한다 */
+function takeoverBrief(s) {
+  const P = s.prelude || [];
+  if (!P.length) return '';
+  const Y = mergeReports(P), last = P[P.length - 1];
+  const T = r => Object.values(r.shipped || {}).reduce((a, b) => a + b, 0);
+  const tons = T(Y), proc = 1 - ((Y.shipped || {}).C2C || 0) / Math.max(1, tons);
+  const ct = custTonsOf(Y), ks = Object.keys(CUST).sort((a, b) => (ct[b] || 0) - (ct[a] || 0));
+  const u = lineUtilOf(Y), st = stockOf(last);
+  const M1 = v => (v < 0 ? '−$' : '$') + (Math.abs(v) / 1e6).toFixed(1) + 'M';
+  const K1 = v => (v < 0 ? '−$' : '$') + fmt(Math.abs(v) / 1000) + 'k';
+  const lines = s.lines.map(l => `${CFG.LINE[l.type].label} ${Math.round((u[l.type] || 0) * 100)}%`).join(', ');
+  return `<div class="card brief-take">
+    <div class="say"><div class="face">${face('han')}</div><div class="bubble">
+      <span class="who">${CAST.han.name} · ${CAST.han.role}</span>
+      사장님, 부임을 환영합니다. 작년 실적부터 보고드리겠습니다.<br><br>
+      작년 판매는 <b>${fmt(tons)}톤</b>, 매출 <b>${M1(Y.revenue)}</b>, 영업이익 <b>${K1(Y.op)}</b>,
+      순이익 <b>${K1(Y.np)}</b>입니다. ${Y.np < 0 ? '영업으로는 겨우 남겼는데 이자 내고 나면 적자입니다.' : ''}
+      가공 판매 비중은 ${Math.round(proc * 100)}%이고, 거래가 제일 큰 곳은
+      ${cname(ks[0])} ${Math.round((ct[ks[0]] || 0) / tons * 100)}%, 그다음이 ${cname(ks[1])} ${Math.round((ct[ks[1]] || 0) / tons * 100)}%입니다.
+      설비는 작년 평균 ${lines}로 돌았습니다.<br><br>
+      지금 창고와 바다 위에 <b>${fmt(st.inv)}톤(${st.invM.toFixed(1)}개월치)</b>, 본사에서 생산 중인 것까지 합치면
+      <b>${fmt(st.res)}톤(${st.resM.toFixed(1)}개월치)</b>입니다. 은행 빚은 ${M1(s.debt.principal)}입니다.<br><br>
+      짚어드릴 게 두 가지 있습니다. 전임 사장님이 설비 정비를 한 번 미루셨고,
+      창고 구석에 규격이 애매한 일반재 2,400톤이 다섯 달째 묵어 있습니다.</div></div>
+  </div>`;
 }
 
 /* ---------- 고객 구성 ---------- */
@@ -907,6 +1008,14 @@ const periodTotal = () => (G.mpt > 1 ? Math.ceil(CFG.TOTAL_TURNS / 3) : CFG.TOTA
 
 /* 여러 달 결산을 하나로 합친다. 잔액(재고·채권·차입)은 마지막 달 것을 쓰고,
    손익과 물량은 기간 합계를 쓴다. */
+/* 고객군별 판매량 — 그 달 출하량을 그 달 고객 구성대로 나눈다 */
+function custTonsOf(R) {
+  if (R.custTons) return R.custTons;
+  const T = Object.values(R.shipped || {}).reduce((a, b) => a + b, 0), out = {};
+  for (const k in CFG.CUSTOMERS) out[k] = T * ((R.custShare || {})[k] || 0);
+  return out;
+}
+
 function mergeReports(list) {
   if (list.length === 1) return list[0];
   const last = list[list.length - 1];
@@ -922,6 +1031,9 @@ function mergeReports(list) {
     interest: sum('interest'), valuationLoss: sum('valuationLoss'), badDebt: sum('badDebt'),
     degradeLoss: sum('degradeLoss'), dumpLoss: sum('dumpLoss'), scrapRevenue: sum('scrapRevenue'),
     shipped: sumObj('shipped'), demandAuto: sumObj('demandAuto'), sales: sumObj('sales'),
+    run: sumObj('run'), capNow: sumObj('capNow'), materialTons: sum('materialTons'),
+    // 고객 구성은 달마다 바뀌니, 고객군별 판매량은 달마다 계산해서 더한다
+    custTons: list.reduce((a, r) => { const c = custTonsOf(r); for (const k in c) a[k] = (a[k] || 0) + c[k]; return a; }, {}),
     flags: list.flatMap(r => r.flags || []), log: list.flatMap(r => r.log || []),
     phaseChange: list.map(r => r.phaseChange).filter(Boolean).join(' '),
     lineReady: list.map(r => r.lineReady).filter(Boolean).join(' '),

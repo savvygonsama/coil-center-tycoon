@@ -173,7 +173,7 @@ const CFG = {
   // 수요 모델 (v3 §2-7) — 게임의 생명선
   SALES_EFFORT_LAG: 3,             // 영업 투자 효과는 3턴 뒤
   SALES_EFFORT_GAIN: 0.008,        // $100,000 투자당 점유율 증분 [가정]
-  TRUST_SHARE_COEF: 0.001,
+  TRUST_SHARE_COEF: 0.0004,   // 신뢰가 물량으로 번지는 속도. 너무 크면 신뢰 100에서 점유율이 복리로 폭주한다
 
   // 부실·연체 [가정]
   BAD_DEBT_RATE: 0.006 / 12,
@@ -917,7 +917,7 @@ function resolveTurn(state, decision) {
     // 결품은 신뢰를 깎는 정도가 아니다. 실무자 확인: 결품을 내면 그 고객은 영영 끝이다.
     // 그래서 점유율을 영구히 깎는다. 이게 3개월 안전재고를 드는 이유다.
     const shortRate = (want - ship) / Math.max(want, 1);
-    if (shortRate > 0.05 && s.turn > CFG.LEAD_TURNS) {
+    if (shortRate > 0.05 && (s.running || s.turn > CFG.LEAD_TURNS)) {
       const lost = CFG.SHORTAGE_SHARE_LOSS * Math.min(1, shortRate * 2);
       s.myShare *= 1 - lost;
       // 잃은 고객은 점유율에서 이미 영구히 뺐다. 평판 타격까지 영구로 두면 이중 계산이다.
@@ -1080,7 +1080,8 @@ function resolveTurn(state, decision) {
   s.hq.cumHqMargin += hqMargin;
   s.hq.cumConsolidated += consolidated;
   // 램프업 구간은 분모에서 뺀다. 배가 아직 안 왔는데 못 쳤다고 탓할 수는 없다.
-  if (s.turn > CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd) s.hq.cumAutoDemand = (s.hq.cumAutoDemand || 0) + autoDemandTurn;
+  // 이미 돌던 회사를 넘겨받았으면(s.running) 램프업 구간이 없다
+  if (s.running || s.turn > CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd) s.hq.cumAutoDemand = (s.hq.cumAutoDemand || 0) + autoDemandTurn;
   s.hq.cumAutoShipped = (s.hq.cumAutoShipped || 0) + autoShippedTurn;
 
   /* 비재무 갱신 — 설계서는 "3턴 연속 적자"일 때만 사기를 깎는다. 회복 경로도 둔다. */
@@ -1125,6 +1126,15 @@ function resolveTurn(state, decision) {
     util: (d.run.SLIT + d.run.LEVEL + d.run.TRAP + d.run.DIE) / Math.max(1, cap.SLIT + cap.LEVEL + cap.BLANK),
     shortRatio,
     materialTons,
+    run: { ...d.run }, capNow: { ...cap },
+    // 재고·재원 — 현물(창고)·해상 미착·본사 생산 중을 나눠 둔다. 다음 달 도착하면 지금 바다 위에 있다
+    stock: {
+      onhand: inventoryTons(s),
+      sea:  s.poOpen.filter(p => p.etaTurn - s.turn <= 1).reduce((a, p) => a + p.qty, 0),
+      prod: s.poOpen.filter(p => p.etaTurn - s.turn > 1).reduce((a, p) => a + p.qty, 0),
+      nasi3: s.nasi.slice(0, 3).reduce((a, n) => a + Object.values(n.tons).reduce((x, y) => x + y, 0), 0) / Math.max(1, Math.min(3, s.nasi.length)),
+      fg: s.invFg.reduce((a, l) => a + l.qty, 0),
+    },
     invTons: inventoryTons(s),
     log, flags,
   };

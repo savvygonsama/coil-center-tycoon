@@ -69,9 +69,9 @@ function initWorld(s, diff) {
 
 /* 전임 사장이 남긴 것 — 1년차 "정상화"가 무엇을 정상화하는지 */
 function applyLegacy(s) {
+  // 전임자가 따로 들여온 일반재. 값은 이미 치렀다 (작년 현금흐름에 들어 있다)
   const t = 2400, cost = CFG.P_M_BASE * 1.06;
   s.invRaw.push({ qty: t, unitCost: cost, arrivalTurn: -5, dt: 'SPOT', gr: 'COMMON' });
-  s.cash -= t * cost;
 }
 
 /* ============================================================
@@ -106,6 +106,8 @@ function growCust(s, k, pct) {
   if (pct > 0 && G && G.W) {
     const u = G.W.utilHist.slice(-1)[0] ?? 0.8;
     pct *= Math.max(0.2, Math.min(1, (0.98 - u) / 0.25));
+    // 이미 시장을 많이 쥐고 있으면 더 늘리기가 어렵다. 남은 고객은 경쟁사 충성 고객이다
+    if (s.myShare > 0.18) pct *= Math.pow(0.18 / s.myShare, 2);
   }
   s.myShare *= 1 + sh * pct;
   s.custShare[k] = sh * (1 + pct);
@@ -126,10 +128,18 @@ function standingCut(s, W) {
   for (const k in CUST) { W.cut[k] = Math.min(30, W.cut[k] || 0); c += (s.custShare[k] || 0) * W.cut[k]; }
   return c;
 }
-function coverOf(s) {
-  const L = look(s);
-  return L.need > 0 ? (inventoryTons(s) + openPoTons(s)) / L.need : 9;
+/* 지금 시점의 재고·재원 (결재 직전 기준)
+   이번 달에 도착하는 배는 지금 바다 위에 있다. 그 뒤로 오는 건 아직 본사 공장에 있다. */
+function stockNow(s) {
+  const sea = s.poOpen.filter(p => p.etaTurn <= s.turn).reduce((a, p) => a + p.qty, 0);
+  const prod = s.poOpen.filter(p => p.etaTurn > s.turn).reduce((a, p) => a + p.qty, 0);
+  const ns = s.nasi.slice(0, 3);
+  const d = Math.max(1, ns.reduce((a, n) => a + Object.values(n.tons).reduce((x, y) => x + y, 0), 0) / Math.max(1, ns.length));
+  const inv = inventoryTons(s) + sea, res = inv + prod;
+  return { inv, res, invM: inv / d, resM: res / d, sea, prod };
 }
+/* 재고율 — (창고 현물 + 해상 미착) ÷ 향후 3개월 내시 평균 */
+function coverOf(s) { return stockNow(s).invM; }
 /* 통장과 은행 한도로 몇 달을 버티나 */
 function runway(s) {
   const L = look(s);
@@ -257,7 +267,7 @@ function rollIncidents(s, W, k = 1) {
   if (!W.breakdown && wChance(pB)) W.breakdown = { turn: s.turn + 1, sev: W.equip < 40 ? 2 : 1 };
 
   const outs = W.mem.some(m => m.tag === 'outsource' && s.turn - m.turn <= 3);
-  const pC = (Math.max(0, 72 - W.quality) / 100 * 1.4 + (outs ? 0.08 : 0)) * k;
+  const pC = (Math.max(0, 72 - W.quality) / 100 * 1.4 + (outs ? 0.08 : 0) + (W.packCheap ? 0.04 : 0)) * k;   // 얇은 방청지는 운송 중에 녹을 부른다
   if (!W.claim && wChance(pC)) {
     // 최근에 물량을 몰아준 고객 라인에서 제일 먼저 문제가 드러난다
     const pushed = [...W.mem].reverse().find(m =>
@@ -346,13 +356,18 @@ function briefing(s, W) {
   else if (wChance(0.12)) say('gu', '추정', `슬리터 나이프 쪽이 좀 신경 쓰입니다. 큰일은 아닙니다.`, 3);   // 가끔은 헛걱정
   if (W.fatigue > 35) say('gu', '확인', `반장들이 지쳐 있습니다. 석 달째 특근입니다.`, 7);
 
-  // 구매 — 서 대리. 창고는 정확히 알고, 본사 가격은 소문으로 듣는다.
-  if (W.priceRumor === 1) say('seo', '소문', `본사 쪽에서 다음 분기 소재값을 올린다는 얘기가 돕니다. 확정은 아니고요…`, 6);
-  else if (W.priceRumor === -1) say('seo', '소문', `본사 재고가 많이 쌓였다고, 다음 분기엔 값이 내려갈 수도 있다는데요…`, 6);
-  if (cov < 2.4) say('seo', '확인', `창고랑 바다 위 물량을 합쳐도 ${cov.toFixed(1)}개월치밖에 안 됩니다. 좀 불안합니다.`, 9);
-  else if (cov > 4.6) say('seo', '확인', `창고랑 바다 위 합쳐서 ${cov.toFixed(1)}개월치입니다. 많이 들고 있습니다.`, 6);
+  // 소재 발주 — 정 부장. 영업이 내시를 보고 소재를 건다. 본사 가격은 본사 영업팀 소문으로 듣는다.
+  const sn = stockNow(s);
+  if (W.priceRumor === 1) say('jung', '소문', `본사 영업팀 동기 얘기로는 다음 분기에 소재값을 올린답니다. 확정은 아니고요.`, 6);
+  else if (W.priceRumor === -1) say('jung', '소문', `본사 재고가 많이 쌓였답니다. 다음 분기엔 값이 내려갈 수도 있다는데, 반쯤은 소문입니다.`, 6);
+  if (cov < 1.5) say('jung', '확인', `재고율이 ${cov.toFixed(1)}개월밖에 안 됩니다. 본사에서 생산 중인 것까지 쳐도 ${sn.resM.toFixed(1)}개월이라, 결품 날까 봐 조마조마합니다.`, 9);
+  else if (cov > 3.4) say('jung', '확인', `재고율 ${cov.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월입니다. 영업 입장에선 든든한데 한 부장님 표정이 안 좋습니다.`, 6);
 
-  // 영업 — 정 과장. 시장 소문을 제일 먼저 듣는데, 부풀린다.
+  // 자재 — 서 대리. 비품·포장재·MRO. 현장이 잘 안 보는 것들을 본다.
+  if (W.spares === false && W.equip < 60) say('seo', '확인', `베어링이랑 유압호스 예비품이 바닥이에요… 설비가 서면 부품 오는 데 열흘은 걸립니다.`, 7);
+  if (W.packCheap) say('seo', '추정', `바꾼 포장재 업체 방청지가 좀 얇은 것 같아요. 우기에 괜찮을지 모르겠습니다.`, 5);
+
+  // 영업 — 정 부장. 시장 소문을 제일 먼저 듣는데, 부풀린다.
   const ks = Object.keys(CUST).filter(k => (s.custShare[k] || 0) > 0.06);
   const rumK = ks.find(k => W.threat[k] ? wChance(0.75) : wChance(0.08));
   if (rumK) say('jung', '소문', `${cname(rumK)}에 경쟁사가 톤당 $${wPick([15, 18, 20, 25])} 낮게 들어갔다는 얘기가 있습니다.`, 8);
@@ -361,7 +376,7 @@ function briefing(s, W) {
   const warm = ks.find(k => W.relHigh[k] >= 2);
   if (warm && wChance(0.6)) say('jung', '추정', `${cname(warm)} 쪽은 요즘 우리한테 호의적입니다. 뭔가 더 맡길 눈치입니다.`, 5);
 
-  // 재무 — 한 대리. 숫자만 말한다. 틀리지 않는다.
+  // 재무 — 한 부장. 숫자만 말한다. 틀리지 않는다.
   if (run < 1.6) say('han', '확인', `결론부터 말씀드리면, 지금 현금과 한도로 버틸 수 있는 건 ${run.toFixed(1)}개월입니다. 큰 구매는 부담입니다.`, 9);
   const delayed = s.ar.filter(a => a.delayed).reduce((a, x) => a + x.amount, 0);
   if (delayed > 500_000) say('han', '확인', `대금이 늦어지는 곳이 있습니다. 밀린 게 $${fmt(delayed / 1000)}k입니다.`, 6);
@@ -400,7 +415,7 @@ function warnings(s, W) {
     out.push(['생산', '가동률이 3개월 연속 90%를 넘었습니다. 설비 고장과 품질 위험이 쌓이고 있습니다.']);
   if (W.equip < 50) out.push(['설비', `설비 상태 ${equipLabel(W.equip)}. 마지막 정비 후 ${W.maintAge}개월째입니다.`]);
   const c = W.coverHist.slice(-3);
-  if (c.length === 3 && c[2] > c[0] + 0.6 && c[2] > 4) out.push(['재무', '소재 재고가 빠르게 늘고 있습니다. 현금이 창고에 묶이고 있습니다.']);
+  if (c.length === 3 && c[2] > c[0] + 0.5 && c[2] > 3.2) out.push(['재무', '소재 재고가 빠르게 늘고 있습니다. 현금이 창고에 묶이고 있습니다.']);
   if (coverOf(s) < 2.3 && s.turn > 3) out.push(['구매', '석 달 뒤 소재가 모자랄 수 있습니다. 결품이면 큰 고객부터 등을 돌립니다.']);
   for (const k in CUST) {
     const h = W.shareHist[k].slice(-4);
@@ -481,4 +496,59 @@ function companyProfile(s, W) {
     lines.push(`한편으로는 ${STYLE_NAME[sub]}의 모습도 강했습니다.`);
   lines.push(STYLE_NEXT[main]);
   return { main, sub, name: STYLE_NAME[main], lines, m, st };
+}
+
+/* ============================================================
+   인수인계 — 이 회사는 이미 돌고 있었다.
+   전임 사장이 무난하게 굴린 16개월을 실제로 돌리고, 마지막 12개월을 "작년 실적"으로 넘겨받는다.
+   그래서 첫 달부터 창고에 소재와 제품이 있고, 바다 위와 본사 공장에 물량이 있고,
+   받을 돈과 줄 돈이 있다. 숫자는 전부 엔진이 실제로 계산한 것이다.
+   ============================================================ */
+function runPrelude(s, months = 16) {
+  const gameScenario = s.scenario, gamePhase = s.market.phase;
+  s.scenario = [{ phase: 'NORMAL', drift: 0, to: 9999, name: '통상', label: '전임 사장 시절', brief: '' }];
+  s.market.phase = 'NORMAL';
+  const ui = { cover: 2.2, hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null };
+  const reps = [];
+  for (let i = 0; i < months && !s.over; i++) {
+    const r = resolveTurn(s, buildDecision(s, ui));
+    s = r.state; reps.push(r.report);
+  }
+  // 날짜를 다시 맞춘다 — 넘겨받는 달이 1턴(2026년 1월)이 되도록
+  const off = s.turn - 1, sh = t => t - off;
+  for (const l of s.invRaw) if (l.arrivalTurn != null) l.arrivalTurn = sh(l.arrivalTurn);
+  for (const l of s.invFg) { if (l.madeTurn != null) l.madeTurn = sh(l.madeTurn); if (l.arrivalTurn != null) l.arrivalTurn = sh(l.arrivalTurn); }
+  for (const p of s.poOpen) p.etaTurn = sh(p.etaTurn);
+  for (const a of s.ar) a.dueTurn = sh(a.dueTurn);
+  for (const a of s.ap) a.dueTurn = sh(a.dueTurn);
+  for (const n of s.nasi) n.turn = sh(n.turn);
+  for (const b of (s.buildQueue || [])) b.readyTurn = sh(b.readyTurn);
+  for (const q of (s.custQueue || [])) q.turn = sh(q.turn);
+  s.prelude = reps.slice(-12).map(r => ({ ...r, turn: sh(r.turn), date: dateLabel(sh(r.turn)) }));
+  // 성적표는 부임한 날부터 센다
+  s.turn = 1; s.over = false; s.overReason = null; s.running = true;
+  s.scenario = gameScenario; s.market.phase = gamePhase;
+  s.history = [];
+  s.cum = { sales: { C2C: 0, SLIT: 0, LEVEL: 0, BLANK: 0 }, revenue: 0, op: 0, np: 0 };
+  s.hq = { cumMaterialTons: 0, cumHqMargin: 0, cumConsolidated: 0 };
+  s.lossStreak = 0;
+  return s;
+}
+
+/* 재고·재원 — 톤과 개월
+   재고량 = 창고 현물(소재+제품) + 해상 미착
+   재원량 = 재고량 + 본사에서 생산 중인 물량
+   둘 다 향후 3개월 내시 평균으로 나눠 몇 개월치인지 본다 */
+function stockOf(R) {
+  const st = (R && R.stock) || {};
+  const d = Math.max(1, st.nasi3 || 1);
+  const inv = (st.onhand || 0) + (st.sea || 0), res = inv + (st.prod || 0);
+  return { onhand: st.onhand || 0, fg: st.fg || 0, sea: st.sea || 0, prod: st.prod || 0,
+           inv, res, invM: inv / d, resM: res / d, nasi3: st.nasi3 || 0 };
+}
+/* 설비별 가동률 — 실제로 넣은 소재 ÷ 명목 캐파 */
+function lineUtilOf(R) {
+  const r = (R && R.run) || {}, c = (R && R.capNow) || {};
+  const u = (x, y) => (y > 0 ? x / y : null);
+  return { SLIT: u(r.SLIT || 0, c.SLIT), LEVEL: u(r.LEVEL || 0, c.LEVEL), BLANK: u((r.TRAP || 0) + (r.DIE || 0), c.BLANK) };
 }

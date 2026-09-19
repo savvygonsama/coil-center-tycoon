@@ -27,9 +27,9 @@ function worldIssues(s, W, G) {
   if (s.turn === 1) add(legacyCard(s, W), 94, true);
 
   /* ---------- 과거 결정이 만든 문제 ---------- */
-  if (cov < 2.2 && s.turn > 2 && since('w-short') > 1) add(shortCard(s, W, L, cov), 88);
+  if (cov < 1.3 && since('w-short') > 1) add(shortCard(s, W, L, cov), 88);
   if (run < 1.3 && s.turn > 3 && since('w-cash') > 2) add(cashCard(s, W, run), 90);
-  if ((cov > 4.8 || inventoryTons(s) > CFG.WAREHOUSE_CAP_BASE * 0.85) && since('w-over') > 3) add(overCard(s, W, cov), 72);
+  if ((cov > 3.6 || inventoryTons(s) > CFG.WAREHOUSE_CAP_BASE * 0.85) && since('w-over') > 3) add(overCard(s, W, cov), 72);
   if ((W.equip < 60 || W.maintAge >= 9) && since('w-maint') > 2)
     add(maintCard(s, W), 50 + Math.max(0, 60 - W.equip) * 2 + W.deferMaint * 8);
   if (hot >= 2 && W.fatigue > 22 && since('w-load') > 4) add(overloadCard(s, W, hot), 76);
@@ -63,6 +63,26 @@ function worldIssues(s, W, G) {
   if (W.priceRumor && W.priceRumor !== 0 && s.turn % 3 === 1 && since('w-rumor') > 2) add(rumorCard(s, W), 50);
   if (s.turn === 2 || since('w-policy') >= 8) add(policyCard(s, W, cov), 38);
 
+  /* ---------- 자재 — 서 대리 ---------- */
+  if (s.turn > 2 && since('m-pack') > 12 && wChance(0.12)) add(packCard(s, W), 44);
+  if (W.spares === undefined && s.turn > 1 && since('m-mro') > 12 && (W.equip < 62 || wChance(0.15))) add(sparesCard(s, W), 48);
+  if (W.spares === false && W.equip < 55 && since('m-mro') > 8) add(sparesCard(s, W), 55);
+  if (s.turn > 8 && !G.seen['m-rebate'] && wChance(0.06)) add(rebateCard(s, W), 50);
+  if (s.turn > 3 && since('m-safety') > 11 && wChance(0.2)) add(safetyCard(s, W), 42 + (W.safety || 0) * 8);
+
+  /* ---------- 관리 — 한 부장 (인사·총무) ---------- */
+  // 속성 모드는 분기 첫 달에만 결재하므로, 정해진 달이 속한 분기의 첫 달로 당긴다
+  const at = mo => (G.mpt > 1 ? month === mo - (mo % 3) : month === mo);
+  if (at(2)) add(wageCard(s, W), 86);                           // 매년 3월 임금협상
+  if (at(11) && s.history.length) add(bonusCard(s, W), 82);     // 매년 12월 성과급
+  const otRecent = W.mem.some(m => m.tag === 'overtime' && s.turn - m.turn <= 3);
+  if ((otRecent || W.fatigue > 45) && since('h-labor') > 12 && wChance(0.35)) add(laborCard(s, W), 66);
+  if (s.turn > 5 && since('h-house') > 14 && wChance(0.1)) add(housingCard(s, W), 36);
+  if (at(5) && since('h-insure') > 10) add(insureCard(s, W), 46);
+  if (s.turn > 14 && !G.seen['h-tax'] && wChance(0.05)) add(taxCard(s, W), 74);
+  if ((W.mem.some(m => m.tag === 'quit' && s.turn - m.turn <= 2) || (s.morale < 50 && wChance(0.15)))
+      && since('h-hire') > 10) add(vacancyCard(s, W), 60);
+
   /* ---------- 조용할 때 ---------- */
   if ((s.turn - (G.lastCust ?? -99)) >= (G.mpt > 1 ? 2 : 5)) add(custFocusCard(s, W), 34);
   if (s.turn > 8 && since('w-credit') > 9 && wChance(0.25)) add(creditCard(s, W), 30);
@@ -87,9 +107,14 @@ function breakdownCard(s, W) {
     why ? `${why} 이후로 무리하게 돌렸습니다.` : '',
     hot >= 2 ? `최근 넉 달 중 ${hot}달을 가동률 90% 넘게 돌렸습니다.` : '',
     W.deferMaint >= 1 ? `정비는 ${W.maintAge}개월째 못 했습니다.` : '',
+    W.spares === true ? "그나마 예비 베어링이 있어서 바로 갈아 끼울 수 있습니다." : W.spares === false ? "예비 부품이 없어서 해외에서 와야 합니다. 열흘은 걸립니다." : "",
+    W.insLow ? "기계 보험을 뺐으니 수리비는 전부 우리 돈입니다." : "",
   ].filter(Boolean).join(' ');
   const done = (s, G, cap, cost, eq, msg, tag) => {
-    W.capHit *= cap; s.cash -= cost; W.equip = wClamp(W.equip + eq);
+    // 예비품이 있으면 바로 갈아 끼우고, 없으면 부품이 올 때까지 선다. 기계보험을 뺐으면 수리비가 더 든다
+    const c2 = W.spares ? Math.min(0.95, cap * 1.12) : W.spares === false ? cap * 0.88 : cap;
+    const cost2 = W.insLow ? Math.round(cost * 1.5) : cost;
+    W.capHit *= c2; s.cash -= cost2; W.equip = wClamp(W.equip + eq); cost = cost2;
     W.breakdown = null; W.stats.breakdowns++;
     for (const k of Object.keys(CUST).sort((a, b) => (s.custShare[b] || 0) - (s.custShare[a] || 0)).slice(0, 2))
       W.rel[k] = wClamp(W.rel[k] - (cap < 0.75 ? 6 : 3));
@@ -121,7 +146,7 @@ function breakdownCard(s, W) {
 
 function claimCard(s, W, k) {
   // 그 고객에게 물량을 몰아준 게 제일 직접적인 원인이다. 없으면 공장 쪽 원인을 찾는다.
-  const why = cause(W, s, ['volume', 'project'], k) || cause(W, s, ['outsource', 'overtime', 'defer', 'skipqual']);
+  const why = cause(W, s, ['volume', 'project'], k) || cause(W, s, ['outsource', 'pack-cheap', 'overtime', 'defer', 'skipqual']);
   const amt = Math.round((80 + (s.custShare[k] || 0) * 400) / 10) * 10;   // $천
   const done = (s, G, cost, rel, trust, share, msg, tag) => {
     s.cash -= cost; W.rel[k] = wClamp(W.rel[k] + rel); s.trust = wClamp(s.trust + trust);
@@ -165,7 +190,7 @@ function hqAnnualCard(s, W, L) {
   const run = runway(s), cov = coverOf(s);
   const util = W.utilHist.length ? W.utilHist.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, W.utilHist.length) : 0.8;
   const finance = run < 2 ? '현금 여유가 없습니다. 공격적으로 늘리면 운전자금이 먼저 터집니다.'
-                : cov > 4 ? '재고가 이미 무겁습니다. 더 사면 창고에 돈이 묶입니다.'
+                : cov > 3.2 ? '재고가 이미 무겁습니다. 더 사면 창고에 돈이 묶입니다.'
                 : '재무적으로는 감당할 만합니다. 다만 마진이 얇아지면 이야기가 달라집니다.';
   const prod = util > 0.88 ? '지금 라인으로는 추가 물량을 감당하기 어렵습니다. 무리하면 설비가 먼저 탈 겁니다.'
              : util < 0.65 ? '라인은 놀고 있습니다. 물량만 있으면 돌릴 수 있습니다.'
@@ -181,7 +206,7 @@ function hqAnnualCard(s, W, L) {
     id: 'w-hq-annual', who: 'jung', topic: 'hq',
     title: `${y + 1}년차 — 본사가 올해 소재 판매 목표를 내려보냈습니다`,
     text: `본사 요구는 연 ${fmt(ask)}톤${y > 0 ? `, 작년보다 ${Math.round((HQ_GROWTH[y] - 1) * 100)}% 늘리라는 겁니다` : '입니다'}. `
-        + `회의에서 의견이 갈렸습니다. 한 대리는 "${finance}" 구 공장장은 "${prod}" `
+        + `회의에서 의견이 갈렸습니다. 한 부장는 "${finance}" 구 공장장은 "${prod}" `
         + `저는 가격을 좀 내리면 물량은 잡을 수 있다고 봅니다. 올해 테마는 「${YEAR_THEME[y].name}」입니다.`,
     opts: [
       { label: '요구대로 받는다', hint: '본사가 제일 좋아하는 답',
@@ -275,10 +300,10 @@ function shortCard(s, W, L, cov) {
   const t = Math.round(L.need * 0.6 / 100) * 100;
   const prem = 0.09;
   return {
-    id: 'w-short', who: 'seo', topic: 'buy',
-    title: '석 달 뒤 소재가 모자랍니다',
-    text: `저… 창고와 바다 위를 다 합쳐도 ${cov.toFixed(1)}개월치입니다. ${why ? `${why} 이후 쓰는 속도가 들어오는 속도보다 빨랐어요. ` : ''}`
-        + `이대로면 결품이 나고, 결품이 나면 큰 고객부터 등을 돌립니다.`,
+    id: 'w-short', who: 'jung', topic: 'buy',
+    title: '소재가 모자랍니다',
+    text: `사장님, 재고율이 ${cov.toFixed(1)}개월까지 내려왔습니다. 본사에서 생산 중인 것까지 쳐도 ${stockNow(s).resM.toFixed(1)}개월이에요. ${why ? `${why} 이후 쓰는 속도가 들어오는 속도보다 빨랐습니다. ` : ""}`
+        + `이대로 가면 결품입니다. 결품 나면 큰 고객부터 등을 돌립니다. 제가 제일 무서워하는 게 그겁니다.`,
     opts: [
       { label: `현지 유통에서 ${fmt(t)}톤을 급히 산다`, hint: '비싸도 바로 온다',
         fx: [`−통장 $${fmt(t * s.market.pm * (1 + prem) / 1000)}k 즉시`, `−톤당 ${Math.round(prem * 100)}% 비쌈`, '+결품 방지'],
@@ -314,7 +339,7 @@ function overCard(s, W, cov) {
   return {
     id: 'w-over', who: 'han', topic: 'buy',
     title: '창고에 돈이 묶여 있습니다',
-    text: `결론부터 말씀드리면, 재고가 ${cov.toFixed(1)}개월치입니다. ${why ? `${why}의 영향이 큽니다. ` : ''}`
+    text: `결론부터 말씀드리면, 재고율 ${cov.toFixed(1)}개월, 재원율 ${stockNow(s).resM.toFixed(1)}개월입니다. 너무 많이 들고 있습니다. ${why ? `${why}의 영향이 큽니다. ` : ''}`
         + `소재값이 내리면 그만큼 손실이고, 그 사이 이자는 계속 나갑니다. 석 달 넘은 것만 ${fmt(oldT)}톤입니다.`,
     opts: [
       { label: `오래된 것 ${fmt(sellT)}톤을 할인해서 판다`, hint: '손실을 보고 현금을 뺀다',
@@ -348,11 +373,11 @@ function rumorCard(s, W) {
     return msg;
   };
   return {
-    id: 'w-rumor', who: 'seo', topic: 'buy',
+    id: 'w-rumor', who: 'jung', topic: 'buy',
     title: up ? '본사가 소재값을 올린다는 소문이 있습니다' : '소재값이 내릴 거라는 얘기가 있습니다',
     text: up
-      ? '본사 구매 쪽 동기한테 들었는데요… 다음 분기 인상을 검토한답니다. 확정은 아니에요. 제 동기가 틀린 적도 있고요.'
-      : '본사 재고가 많이 쌓였다고, 다음 분기엔 값이 내려갈 수 있다는데요… 반쯤은 소문입니다.',
+      ? '사장님, 본사 영업팀 동기한테 들었는데요, 다음 분기에 소재값을 올린답니다. 확정은 아닙니다. 그 친구가 틀린 적도 있고요. 발주를 어떻게 걸지 정해주십시오.'
+      : '본사 재고가 많이 쌓였답니다. 다음 분기엔 값이 내려갈 수도 있다는데, 반쯤은 소문입니다. 발주를 어떻게 걸지 정해주십시오.',
     opts: up ? [
       { label: '오르기 전에 넉넉히 산다', hint: '소문에 건다', fx: ['+맞으면 싸게 산 셈', '−발주 ×1.5 · 현금 묶임', '?소문이 틀리면 재고만 남음'],
         apply: act(1.5, 'overbuy', '인상 소문에 선매입', '넉넉히 걸었습니다. 소문이 맞길 바랍니다.', 'grow') },
@@ -377,16 +402,16 @@ function policyCard(s, W, cov) {
   };
   const cur = { tight: '타이트', normal: '표준', ample: '넉넉' }[W.policy];
   return {
-    id: 'w-policy', who: 'seo', topic: 'policy',
+    id: 'w-policy', who: 'jung', topic: 'policy',
     title: '재고를 얼마나 들고 갈지 정해주세요',
-    text: `매달 여쭤보기보다는 방침을 정해두는 게 좋을 것 같아서요. 지금은 「${cur}」이고, 창고와 바다 위를 합쳐 ${cov.toFixed(1)}개월치입니다. `
-        + `배가 늦게 오는 달도 있고, 본사 값이 갑자기 오르는 달도 있습니다… 저는 늘 조금 더 들고 있는 쪽이 마음이 편하긴 한데, 한 대리님은 반대하세요.`,
+    text: `사장님, 소재 발주 방침을 정해두시죠. 지금은 「${cur}」이고 재고율 ${cov.toFixed(1)}개월, 재원율 ${stockNow(s).resM.toFixed(1)}개월입니다. `
+        + `영업 입장에선 결품이 제일 무섭습니다. 배가 늦게 오는 달도 있고, 내시가 갑자기 느는 달도 있고요. 한 부장님은 재고에 돈 묶인다고 반대하십니다.`,
     opts: [
       { label: '넉넉하게', hint: '결품이 제일 무섭다', fx: ['+결품 위험 ↓', '−현금이 창고에 묶임', '?값이 내리면 손실'],
-        apply: set('ample', 'policy-ample', '재고 방침 넉넉', '넉넉하게 들고 갑니다. 서 대리 얼굴이 밝아졌습니다.', 'cust') },
+        apply: set('ample', 'policy-ample', '재고 방침 넉넉', '넉넉하게 들고 갑니다. 정 부장이 안심했습니다. 한 부장은 한숨을 쉬었습니다.', 'cust') },
       { label: '표준', hint: '리드타임만큼', fx: ['=표준'], apply: set('normal', 'policy-normal', '재고 방침 표준', '표준으로 갑니다.', null) },
       { label: '타이트하게', hint: '현금이 제일 중요하다', fx: ['+현금 여유', '−결품 위험 ↑', '?배가 늦으면 라인이 선다'],
-        apply: set('tight', 'policy-tight', '재고 방침 타이트', '타이트하게 갑니다. 한 대리가 고개를 끄덕였습니다.', 'cash') },
+        apply: set('tight', 'policy-tight', '재고 방침 타이트', '타이트하게 갑니다. 한 부장가 고개를 끄덕였습니다.', 'cash') },
     ],
   };
 }
@@ -524,7 +549,7 @@ function idleCard(s, W) {
         apply: (s, G) => { s.cash -= 90_000; s.effortQueue.push({ amount: 90_000, turnsLeft: CFG.SALES_EFFORT_LAG });
           styleAdd(W, 'grow'); remember(W, s, 'push', '영업 강화');
           lever(G, '영업 강화', { cash: -90_000, risk: '효과는 석 달 뒤' });
-          return '정 과장이 신이 났습니다. 결과는 석 달 뒤에 봅니다.'; } },
+          return '정 부장이 신이 났습니다. 결과는 석 달 뒤에 봅니다.'; } },
     ],
   };
 }
@@ -610,7 +635,7 @@ function priceCard(s, W, k) {
           styleAdd(W, 'cust'); styleAdd(W, 'grow');
           remember(W, s, 'concede', `${CUST[k]}에 $${ask} 양보`, { cust: k });
           lever(G, `${CUST[k]} 단가 인하 수용`, { cut: [k, ask], rel: [[k, 7]] });
-          return `받아줬습니다. ${CUST[k]} 구매팀장이 웃었습니다. 정 과장은 "다음엔 더 세게 올 겁니다"라고 했습니다.`; } },
+          return `받아줬습니다. ${CUST[k]} 구매팀장이 웃었습니다. 정 부장은 "다음엔 더 세게 올 겁니다"라고 했습니다.`; } },
       { label: '품질·납기 실적을 들고 설득한다', hint: '평소에 쌓은 게 있어야 통한다',
         fx: ['?품질·관계가 좋아야 먹힌다', '+통하면 단가 유지'],
         apply: (s, G) => { const ok = W.quality >= 72 && W.rel[k] >= 55 && wChance(0.75);
@@ -764,7 +789,7 @@ function creditCard(s, W) {
             return null; } });
           remember(W, s, 'credit', `${CUST[k]} 여신 확대`, { cust: k });
           lever(G, `${CUST[k]} 여신 확대`, { vol: v, rel: [[k, 5]], risk: '6개월 뒤 대손 가능성' });
-          return '한도를 올렸습니다. 한 대리 표정이 굳었습니다.'; } },
+          return '한도를 올렸습니다. 한 부장 표정이 굳었습니다.'; } },
       { label: '보증보험을 끼고 올려준다', hint: '안전하게', fx: ['−통장 $30,000', '+물량 조금 ↑'],
         apply: (s, G) => { s.cash -= 30_000; const v = growCust(s, k, 0.07); styleAdd(W, 'cash');
           lever(G, `${CUST[k]} 여신 (보증)`, { vol: v, cash: -30_000 });
@@ -773,6 +798,305 @@ function creditCard(s, W) {
         apply: (s, G) => { const v = growCust(s, k, -0.08); W.rel[k] = wClamp(W.rel[k] - 4); styleAdd(W, 'cash');
           lever(G, `${CUST[k]} 여신 거절`, { vol: v, rel: [[k, -4]] });
           return '거절했습니다. 밤에 잠은 잘 옵니다.'; } },
+    ],
+  };
+}
+
+/* ============================================================
+   자재 — 서 대리. 비품·포장재·MRO.
+   현장이 잘 안 보는 것들이다. 그런데 이게 떨어지면 라인이 서고, 이게 싸구려면 클레임이 온다.
+   ============================================================ */
+function packCard(s, W) {
+  const up = wPick([12, 15, 18]);
+  return {
+    id: 'm-pack', who: 'seo', topic: 'mat',
+    title: '포장재 단가 인상 통보가 왔습니다',
+    text: `저… 스틸 밴드랑 목재 스키드, 방청지 공급사에서 다음 달부터 ${up}% 올리겠다고 합니다. 원자재가 올랐대요. `
+        + `한 달에 $12k쯤 더 나가는 셈입니다. 다른 업체도 알아봤는데, 싼 데는 방청지가 좀 얇더라고요…`,
+    opts: [
+      { label: '인상을 받아들인다', hint: '품질은 그대로', fx: ['−고정비 월 $12,000', '=포장 품질 유지'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 12_000; W.packCheap = false; styleAdd(W, 'craft');
+          lever(G, '포장재 인상 수용', { risk: '고정비 월 $12k 증가' });
+          return '받아들였습니다. 포장은 그대로입니다.'; } },
+      { label: '싼 업체로 바꾼다', hint: '비용을 줄인다', fx: ['+고정비 월 $4,000 절감', '?운송 중 녹·흠집 → 클레임 위험 ↑'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) - 4_000; W.packCheap = true; styleAdd(W, 'cash');
+          remember(W, s, 'pack-cheap', '포장재 저가 업체로 교체');
+          lever(G, '포장재 저가 교체', { risk: '클레임 위험 상승' });
+          return '싼 업체로 바꿨습니다. 서 대리가 "우기가 걱정이에요"라고 했습니다.'; } },
+      { label: '인상폭을 절반으로 협상한다', hint: '서 대리가 발로 뛴다', fx: ['−고정비 월 $6,000', '?협상이 안 될 수도'],
+        apply: (s, G) => { if (wChance(0.6)) { G.extraFixed = (G.extraFixed || 0) + 6_000; styleAdd(W, 'cash');
+            lever(G, '포장재 인상 협상 — 절반', { risk: '고정비 월 $6k 증가' });
+            return '서 대리가 사흘을 붙어서 절반으로 깎았습니다. 조용히 일 잘하는 사람입니다.'; }
+          G.extraFixed = (G.extraFixed || 0) + 12_000;
+          lever(G, '포장재 인상 협상 — 실패', { risk: '고정비 월 $12k 증가' });
+          return '협상이 안 됐습니다. 결국 원래대로 올랐습니다.'; } },
+    ],
+  };
+}
+
+function sparesCard(s, W) {
+  return {
+    id: 'm-mro', who: 'seo', topic: 'mat',
+    title: 'MRO 예비품이 거의 없습니다',
+    text: `베어링, 유압호스, 슬리터 나이프 예비품 재고를 봤는데요… 거의 바닥이에요. `
+        + `${W.equip < 60 ? '구 공장장님 말로는 요즘 설비 소리가 안 좋대요. ' : ''}설비가 서면 부품이 해외에서 와야 해서 열흘은 걸립니다.`,
+    opts: [
+      { label: '넉넉히 비축한다', hint: '돈이 창고에 묶인다', fx: ['−통장 $65,000', '+고장 나면 바로 교체 (캐파 손실 ↓)'],
+        apply: (s, G) => { s.cash -= 65_000; W.spares = true; styleAdd(W, 'craft', 2);
+          remember(W, s, 'spares', 'MRO 예비품 비축');
+          lever(G, 'MRO 예비품 비축', { cash: -65_000 });
+          return '예비품을 채웠습니다. 구 공장장이 창고를 한 번 둘러보고 갔습니다.'; } },
+      { label: '공급사 위탁재고 계약', hint: '쓴 만큼만 낸다', fx: ['−고정비 월 $7,000', '+고장 나면 바로 교체'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 7_000; W.spares = true; styleAdd(W, 'craft');
+          remember(W, s, 'spares', 'MRO 위탁재고 계약');
+          lever(G, 'MRO 위탁재고 계약', { risk: '고정비 월 $7k 증가' });
+          return '공급사가 우리 창고에 부품을 두고, 쓴 만큼만 청구하기로 했습니다.'; } },
+      { label: '필요할 때 주문한다', hint: '현금을 지킨다', fx: ['+비용 없음', '?고장 나면 부품 대기로 더 오래 선다'],
+        apply: (s, G) => { W.spares = false; styleAdd(W, 'cash');
+          remember(W, s, 'no-spares', 'MRO 예비품 미확보');
+          lever(G, 'MRO 예비품 미확보', { risk: '고장 시 캐파 손실 확대' });
+          return '그때그때 사기로 했습니다.'; } },
+    ],
+  };
+}
+
+function rebateCard(s, W) {
+  return {
+    id: 'm-rebate', who: 'seo', topic: 'mat',
+    title: '공급업체가 따로 할 말이 있답니다',
+    text: `저… 이걸 말씀드려야 할지 고민했는데요. 스키드 공급업체 사장님이 계약 연장해 주면 저한테 "따로 챙겨주겠다"고 하셨어요. `
+        + `저는 당연히 안 받는다고 했습니다. 다만 그 업체 단가가 시세보다 10%쯤 비싼 건 사실입니다.`,
+    opts: [
+      { label: '보고 잘했다. 경쟁입찰로 바꾼다', hint: '원칙대로', fx: ['+고정비 월 $8,000 절감', '+직원 사기 ↑'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) - 8_000; s.morale = wClamp(s.morale + 3); styleAdd(W, 'cash');
+          remember(W, s, 'clean', '공급업체 경쟁입찰 전환');
+          lever(G, '공급업체 경쟁입찰', { risk: '고정비 월 $8k 절감' });
+          return '경쟁입찰을 붙였습니다. 서 대리가 조금 떨면서도 뿌듯해했습니다.'; } },
+      { label: '거래는 유지하되 조건을 문서로 남긴다', hint: '관계는 지킨다', fx: ['=비용 그대로', '+직원 사기 조금 ↑'],
+        apply: (s, G) => { s.morale = wClamp(s.morale + 1);
+          lever(G, '공급업체 거래 유지 · 기록', {});
+          return '한 부장이 윤리 서약서를 받아뒀습니다. 거래는 그대로입니다.'; } },
+      { label: '못 들은 걸로 한다', hint: '일을 키우지 않는다', fx: ['+당장 조용', '?나중에 감사에서 문제될 수 있다'],
+        apply: (s, G) => { remember(W, s, 'hush', '공급업체 제안 묵인');
+          G.pending.push({ turn: s.turn + 6 + Math.floor(Math.random() * 5), run: s2 => {
+            if (Math.random() < 0.5) { s2.trust = wClamp(s2.trust - 10); s2.morale = wClamp(s2.morale - 6);
+              fire(W, s2, 'audit', '본사 감사에서 스키드 공급업체 거래가 문제 됐습니다. 법인이 윤리 점검 대상에 올랐습니다.', '공급업체 제안을 묵인한 일');
+              return '본사 감사에서 공급업체 거래가 적발됐습니다.'; }
+            return null; } });
+          lever(G, '공급업체 제안 묵인', { risk: '감사 적발 위험' });
+          return '덮었습니다. 서 대리 표정이 어둡습니다.'; } },
+    ],
+  };
+}
+
+function safetyCard(s, W) {
+  return {
+    id: 'm-safety', who: 'seo', topic: 'mat',
+    title: '크레인 와이어와 안전보호구 교체 시기입니다',
+    text: `크레인 와이어가 교체 주기를 넘겼고, 안전화랑 방진 장갑도 다 해졌어요. `
+        + `${W.fatigue > 35 ? '요즘 특근이 많아서 현장이 더 험하게 쓰고 있습니다. ' : ''}금액이 크진 않은데 매번 뒤로 밀리더라고요…`,
+    opts: [
+      { label: '전부 교체한다', hint: '사고를 막는다', fx: ['−통장 $45,000', '+사고 위험 ↓', '+직원 사기 ↑'],
+        apply: (s, G) => { s.cash -= 45_000; W.safety = 0; s.morale = wClamp(s.morale + 3); styleAdd(W, 'craft');
+          remember(W, s, 'safety', '안전 설비 교체');
+          lever(G, '크레인 와이어·보호구 교체', { cash: -45_000 });
+          return '전부 새것으로 바꿨습니다.'; } },
+      { label: '와이어만 교체한다', hint: '큰 것만', fx: ['−통장 $25,000', '=사고 위험 조금 ↓'],
+        apply: (s, G) => { s.cash -= 25_000; W.safety = Math.max(0, (W.safety || 0) - 1);
+          lever(G, '크레인 와이어만 교체', { cash: -25_000 });
+          return '와이어만 갈았습니다.'; } },
+      { label: '다음 분기로 미룬다', hint: '돈을 아낀다', fx: ['+비용 없음', '?산업재해 위험 ↑'],
+        apply: (s, G) => { W.safety = (W.safety || 0) + 2; styleAdd(W, 'cash');
+          remember(W, s, 'safety-skip', '안전 설비 교체 연기');
+          G.pending.push({ turn: s.turn + 2 + Math.floor(Math.random() * 4), run: s2 => {
+            if (Math.random() < 0.3 + W.fatigue / 250) {
+              s2.cash -= 260_000; s2.morale = wClamp(s2.morale - 12); W.capHit *= 0.9; W.stats.accidents = (W.stats.accidents || 0) + 1;
+              fire(W, s2, 'accident', '야드에서 코일이 떨어져 작업자가 다쳤습니다. 노동청 조사로 라인이 며칠 섰습니다.', '안전 설비 교체를 미룬 일');
+              return '산업재해가 났습니다. 보상과 조업 중단으로 $260k.'; }
+            return null; } });
+          lever(G, '안전 설비 교체 연기', { risk: '산재 위험 상승' });
+          return '미뤘습니다. 서 대리가 "기록은 남겨둘게요"라고 했습니다.'; } },
+    ],
+  };
+}
+
+/* ============================================================
+   관리 — 한 부장. 재무에 인사·총무까지.
+   회사는 돈과 톤만으로 돌지 않는다. 사람과 규정과 서류가 있다.
+   ============================================================ */
+function wageCard(s, W) {
+  const infl = wPick([6, 7, 8]);
+  return {
+    id: 'h-wage', who: 'han', topic: 'hr',
+    title: '올해 임금협상입니다',
+    text: `결론부터 말씀드리면, 직원대표가 ${infl + 4}% 인상을 요구했습니다. 작년 현지 물가가 ${infl}% 올랐습니다. `
+        + `옆 공단 두 곳은 벌써 ${infl + 2}% 올려줬습니다. 인상분은 매달 고정비로 계속 나갑니다.`,
+    opts: [
+      { label: `${infl + 4}% 요구대로`, hint: '사람을 잡는다', fx: ['−고정비 월 $40,000', '+직원 사기 ↑↑', '+이직 위험 ↓'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 40_000; s.morale = wClamp(s.morale + 10); styleAdd(W, 'craft');
+          remember(W, s, 'wage-high', '임금 요구 수용');
+          lever(G, `임금 ${infl + 4}% 인상`, { risk: '고정비 월 $40k 증가' });
+          return '요구대로 올렸습니다. 조회 분위기가 밝았습니다.'; } },
+      { label: `물가만큼 ${infl}%`, hint: '절충', fx: ['−고정비 월 $26,000', '=직원 사기 조금 ↑'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 26_000; s.morale = wClamp(s.morale + 2);
+          lever(G, `임금 ${infl}% 인상`, { risk: '고정비 월 $26k 증가' });
+          return '물가만큼 올렸습니다. 직원대표가 아쉬워했지만 받아들였습니다.'; } },
+      { label: '올해는 동결', hint: '고정비를 지킨다', fx: ['+고정비 그대로', '−직원 사기 ↓↓', '?반장급 이직 위험'],
+        apply: (s, G) => { s.morale = wClamp(s.morale - 12); styleAdd(W, 'cash', 2);
+          remember(W, s, 'wage-freeze', '임금 동결');
+          lever(G, '임금 동결', { risk: '사기 하락 · 이직 위험' });
+          return '동결했습니다. 그 주에 사직서가 두 장 들어왔습니다.'; } },
+    ],
+  };
+}
+
+function bonusCard(s, W) {
+  const ytd = s.history.slice(-(((s.turn - 1) % 12) + 1)).reduce((a, r) => a + r.op, 0);
+  const pool = Math.max(60_000, Math.round(Math.max(0, ytd) * 0.08 / 1000) * 1000);
+  return {
+    id: 'h-bonus', who: 'han', topic: 'hr',
+    title: '연말 성과급을 정해야 합니다',
+    text: `올해 영업이익이 ${ytd < 0 ? '−' : ''}$${fmt(Math.abs(ytd) / 1000)}k입니다. `
+        + `${ytd > 0 ? '직원들은 기대하고 있습니다. ' : '직원들도 올해 어려웠던 걸 압니다. '}`
+        + `작년에는 기본급 한 달치를 줬습니다.`,
+    opts: [
+      { label: ytd > 0 ? `이익의 8%를 나눈다` : '어려워도 한 달치는 준다', hint: '사람에게 돌려준다', fx: [`−통장 $${fmt(pool)}`, '+직원 사기 ↑↑'],
+        apply: (s, G) => { s.cash -= pool; s.morale = wClamp(s.morale + 10); styleAdd(W, 'craft');
+          lever(G, '연말 성과급', { cash: -pool });
+          return '성과급을 나눴습니다. 린 매니저가 현장 반응을 전해줬습니다. 좋았다고 합니다.'; } },
+      { label: '기본만', hint: '작년 수준', fx: ['−통장 $60,000', '=사기 그대로'],
+        apply: (s, G) => { s.cash -= 60_000;
+          lever(G, '연말 성과급 기본', { cash: -60_000 });
+          return '작년만큼 줬습니다.'; } },
+      { label: '올해는 없다', hint: '현금을 지킨다', fx: ['+현금 지킴', '−직원 사기 ↓↓'],
+        apply: (s, G) => { s.morale = wClamp(s.morale - 10); styleAdd(W, 'cash', 2);
+          remember(W, s, 'no-bonus', '성과급 미지급');
+          lever(G, '성과급 없음', { risk: '사기 하락' });
+          return '올해는 없다고 공지했습니다. 식당이 조용했습니다.'; } },
+    ],
+  };
+}
+
+function laborCard(s, W) {
+  const why = cause(W, s, ['overtime', 'volume', 'project']);
+  return {
+    id: 'h-labor', who: 'han', topic: 'hr',
+    title: '노동청이 근로시간 점검을 나온답니다',
+    text: `다음 달에 노동청 근로감독이 나옵니다. ${why ? `${why} 이후로 ` : ''}특근 기록을 보면 주 52시간을 넘긴 주가 꽤 있습니다. `
+        + `적발되면 과태료에 시정명령입니다.`,
+    opts: [
+      { label: '지금 교대를 조정한다', hint: '선제 대응', fx: ['−이번 달 캐파 5%', '−통장 $20,000', '+피로 ↓'],
+        apply: (s, G) => { W.capHit *= 0.95; s.cash -= 20_000; W.fatigue = wClamp(W.fatigue - 15); styleAdd(W, 'craft');
+          lever(G, '근로시간 선제 조정', { cash: -20_000, fatigue: -15 });
+          return '교대를 바꾸고 특근을 줄였습니다. 감독관이 "잘 정리돼 있다"고 했습니다.'; } },
+      { label: '서류만 정비한다', hint: '최소한만', fx: ['−통장 $15,000', '?현장이 지쳐 있으면 적발'],
+        apply: (s, G) => { s.cash -= 15_000;
+          if (W.fatigue > 40 && wChance(0.55)) { s.cash -= 150_000; s.trust = wClamp(s.trust - 3);
+            lever(G, '근로감독 — 적발', { cash: -165_000, trust: -3 });
+            return '출퇴근 기록과 서류가 안 맞았습니다. 과태료 $150k에 시정명령이 나왔습니다.'; }
+          lever(G, '근로감독 — 통과', { cash: -15_000 });
+          return '서류로 넘어갔습니다.'; } },
+      { label: '그대로 받는다', hint: '돈을 안 쓴다', fx: ['?적발 가능성 높음'],
+        apply: (s, G) => { if (wChance(0.65)) { s.cash -= 220_000; s.morale = wClamp(s.morale - 5); s.trust = wClamp(s.trust - 4);
+            lever(G, '근로감독 — 적발', { cash: -220_000, trust: -4 });
+            return '적발됐습니다. 과태료 $220k. 본사 인사팀에서도 연락이 왔습니다.'; }
+          lever(G, '근로감독 — 통과', {});
+          return '운이 좋았습니다. 이번에는.'; } },
+    ],
+  };
+}
+
+function housingCard(s, W) {
+  return {
+    id: 'h-house', who: 'han', topic: 'ga',
+    title: '주재원 사택 월세가 오릅니다',
+    text: `주재원 사택 세 채 계약 갱신인데, 집주인이 월세를 30% 올리겠답니다. 이 동네 외국인 주거 수요가 늘었답니다. `
+        + `사장님 사택도 포함입니다.`,
+    opts: [
+      { label: '갱신한다', hint: '주재원 가족이 편하다', fx: ['−고정비 월 $6,000'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 6_000;
+          lever(G, '사택 갱신', { risk: '고정비 월 $6k 증가' });
+          return '갱신했습니다.'; } },
+      { label: '공단 근처 싼 곳으로 옮긴다', hint: '비용을 줄인다', fx: ['−이사비 $25,000', '−주재원 불만'],
+        apply: (s, G) => { s.cash -= 25_000; s.morale = wClamp(s.morale - 3); styleAdd(W, 'cash');
+          lever(G, '사택 이전', { cash: -25_000 });
+          return '공단 근처로 옮겼습니다. 주재원 가족들이 학교가 멀다고 합니다.'; } },
+      { label: '주거수당으로 바꾼다', hint: '각자 알아서', fx: ['−고정비 월 $3,000', '=주재원 선택권'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 3_000;
+          lever(G, '주거수당 전환', { risk: '고정비 월 $3k 증가' });
+          return '수당으로 바꿨습니다. 반응은 반반입니다.'; } },
+    ],
+  };
+}
+
+function insureCard(s, W) {
+  return {
+    id: 'h-insure', who: 'han', topic: 'ga',
+    title: '공장·재고 보험 갱신입니다',
+    text: `화재·재고·기계 보험 갱신인데 보험료가 20% 올랐습니다. 작년에 이 지역 공장 화재가 몇 건 있었답니다. `
+        + `보장을 줄이면 싸지는데, 사고 나면 우리가 떠안습니다.`,
+    opts: [
+      { label: '보장 그대로 갱신', hint: '안전', fx: ['−통장 $85,000'],
+        apply: (s, G) => { s.cash -= 85_000; W.insLow = false;
+          lever(G, '보험 갱신', { cash: -85_000 });
+          return '그대로 갱신했습니다.'; } },
+      { label: '기계 보험을 뺀다', hint: '재고·화재만', fx: ['−통장 $50,000', '?설비 고장 수리비 전액 부담'],
+        apply: (s, G) => { s.cash -= 50_000; W.insLow = true; styleAdd(W, 'cash');
+          remember(W, s, 'ins-low', '기계 보험 제외');
+          lever(G, '기계 보험 제외', { cash: -50_000, risk: '고장 수리비 증가' });
+          return '기계 보험을 뺐습니다. 고장 나면 전액 우리 돈입니다.'; } },
+      { label: '자기부담금을 올린다', hint: '큰 사고만 대비', fx: ['−통장 $62,000', '=작은 사고는 우리 부담'],
+        apply: (s, G) => { s.cash -= 62_000;
+          lever(G, '보험 자기부담 상향', { cash: -62_000 });
+          return '자기부담금을 올리고 보험료를 낮췄습니다.'; } },
+    ],
+  };
+}
+
+function taxCard(s, W) {
+  return {
+    id: 'h-tax', who: 'han', topic: 'ga',
+    title: '세무조사 통지가 왔습니다',
+    text: `현지 국세청에서 세무조사를 나옵니다. 쟁점은 본사와의 거래 가격, 이전가격입니다. `
+        + `우리가 본사에서 소재를 너무 비싸게 사서 현지 이익을 줄였다고 보는 겁니다. 대응 방식에 따라 결과가 크게 다릅니다.`,
+    opts: [
+      { label: '외부 세무법인을 쓴다', hint: '돈으로 막는다', fx: ['−세무법인 $120,000', '+추징 약 $50,000로 최소화'],
+        apply: (s, G) => { s.cash -= 170_000;
+          lever(G, '세무조사 — 외부 대응', { cash: -170_000 });
+          return '세무법인이 이전가격 보고서를 냈습니다. 추징은 $50k로 끝났습니다.'; } },
+      { label: '우리끼리 대응한다', hint: '한 부장이 밤을 샌다', fx: ['?추징이 클 수 있다'],
+        apply: (s, G) => { if (wChance(0.5)) { s.cash -= 600_000;
+            lever(G, '세무조사 — 자체 대응 실패', { cash: -600_000 });
+            return '논리가 부족했습니다. 추징 $600k.'; }
+          s.cash -= 40_000; lever(G, '세무조사 — 자체 대응 성공', { cash: -40_000 });
+          return '한 부장이 자료를 다 맞춰냈습니다. 추징 $40k로 끝났습니다.'; } },
+      { label: '본사 세무팀 지원을 요청한다', hint: '본사에 빚을 진다', fx: ['−본사 신뢰 3', '+추징 적음'],
+        apply: (s, G) => { s.trust = wClamp(s.trust - 3); s.cash -= 150_000;
+          lever(G, '세무조사 — 본사 지원', { cash: -150_000, trust: -3 });
+          return '본사 세무팀이 붙었습니다. 추징 $150k. 본사에서 "법인이 준비가 안 돼 있다"는 말이 나왔습니다.'; } },
+    ],
+  };
+}
+
+function vacancyCard(s, W) {
+  const why = cause(W, s, ['quit', 'wage-freeze', 'no-bonus']);
+  return {
+    id: 'h-hire', who: 'han', topic: 'hr',
+    title: '생산 반장 자리가 비었습니다',
+    text: `${why ? `${why} 이후 ` : ''}생산 2조 반장이 그만뒀습니다. 그 조가 흔들리고 있습니다. 어떻게 채울지 정해야 합니다.`,
+    opts: [
+      { label: '헤드헌터로 경력자를 뽑는다', hint: '빨리, 제대로', fx: ['−통장 $40,000', '+품질 회복', '+조 안정'],
+        apply: (s, G) => { s.cash -= 40_000; W.qBoost += 5; W.fatigue = wClamp(W.fatigue - 6); styleAdd(W, 'craft');
+          lever(G, '반장 경력 채용', { cash: -40_000, quality: 1 });
+          return '경쟁사 출신 반장을 데려왔습니다.'; } },
+      { label: '내부에서 승진시킨다', hint: '사람을 키운다', fx: ['+직원 사기 ↑', '=품질 잠시 흔들림'],
+        apply: (s, G) => { s.morale = wClamp(s.morale + 5); W.quality = wClamp(W.quality - 2); styleAdd(W, 'craft');
+          lever(G, '반장 내부 승진', {});
+          return '조원 중 가장 오래된 사람을 올렸습니다. 다들 좋아합니다.'; } },
+      { label: '당분간 비워둔다', hint: '인건비를 아낀다', fx: ['+비용 없음', '−현장 피로 ↑'],
+        apply: (s, G) => { W.fatigue = wClamp(W.fatigue + 8); styleAdd(W, 'cash');
+          lever(G, '반장 공석 유지', { fatigue: 8 });
+          return '비워뒀습니다. 구 공장장이 그 조를 직접 봅니다.'; } },
     ],
   };
 }
