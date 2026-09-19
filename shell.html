@@ -8,12 +8,13 @@
      둥근 것을 걷어내고, 각진 면과 단단한 그림자로 화면을 나눈다.
      ============================================================ */
   :root{
-    --bg:#eae4d6; --panel:#fbf8f1; --panel2:#f2ece0;
-    --ink:#1e262b; --dim:#6d7880; --line:#cdc4b2; --shade:#d6cdba;
-    --teal:#2c6b70; --teal-l:#dff0ef;
-    --ochre:#d99a2b; --ochre-l:#fbeecf;
-    --rust:#c0522a; --rust-l:#fae0d6;
-    --good:#2c6b70; --warn:#c0522a;
+    --bg:#dbe4ed; --panel:#f9fbfd; --panel2:#e7eef6;
+    --ink:#14283c; --dim:#5d7385; --line:#b4c5d5; --shade:#c1d0de;
+    --blue:#1e5f8c; --blue-l:#dbeaf5;
+    --teal:#2b7a6b; --teal-l:#d9efe8;
+    --ochre:#d99a2b; --ochre-l:#f9edd2;
+    --rust:#c0522a; --rust-l:#f9ded3;
+    --good:#2b7a6b; --warn:#c0522a;
     --cut:14px;
   }
   *{box-sizing:border-box}
@@ -73,7 +74,7 @@
   .row .lab{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;
     margin-bottom:6px;font-weight:700}
   .row .lab b{font-size:17px;font-variant-numeric:tabular-nums}
-  input[type=range]{width:100%;accent-color:var(--rust);height:26px}
+  input[type=range]{width:100%;accent-color:var(--blue);height:26px}
   .hint{font-size:14px;color:var(--dim);margin-top:5px}
 
   button{font:inherit;cursor:pointer;border:2px solid var(--ink);
@@ -82,7 +83,7 @@
   button:hover{transform:translate(-1px,-1px);box-shadow:5px 5px 0 var(--shade)}
   button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--shade)}
   button:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:3px 3px 0 var(--shade)}
-  .primary{background:var(--rust);border-color:var(--ink);color:#fff;font-weight:800;
+  .primary{background:var(--blue);border-color:var(--ink);color:#fff;font-weight:800;
     padding:15px 32px;font-size:19px;letter-spacing:-.02em;box-shadow:5px 5px 0 var(--ink)}
   .primary:hover{box-shadow:7px 7px 0 var(--ink)}
   .primary:active{box-shadow:2px 2px 0 var(--ink)}
@@ -105,7 +106,7 @@
   .cap{position:absolute;top:0;bottom:0;width:3px;background:var(--ink)}
   .bar .n{text-align:right;font-variant-numeric:tabular-nums;color:var(--dim);font-weight:600}
 
-  .note{background:var(--ochre-l);border:2px solid var(--ink);padding:11px 15px;
+  .note{background:var(--blue-l);border:2px solid var(--ink);padding:11px 15px;
     font-size:15px;margin:12px 0;box-shadow:3px 3px 0 var(--shade)}
   .note.bad{background:var(--rust-l)}
   .note.good{background:var(--teal-l)}
@@ -131,7 +132,7 @@
 <style>
   /* ---------- 공장 전경 ---------- */
   .plantwrap{position:relative;width:100%;max-width:700px;margin:0 auto;aspect-ratio:1/1;
-    overflow:hidden;background:#dfe6ec;border:2px solid var(--ink);user-select:none}
+    overflow:hidden;background:#ccd9e4;border:2px solid var(--ink);user-select:none}
   .plbase{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
   .pl{position:absolute;transform:translate(-50%,-100%);display:block}
   .pltag{position:absolute;transform:translate(-50%,0);z-index:90;white-space:nowrap;
@@ -174,9 +175,9 @@
   @media(min-width:760px){ .modes{grid-template-columns:1fr 1fr} }
   .modecard{text-align:left;padding:18px 20px;line-height:1.55;
     border:2px solid var(--ink);background:var(--panel);box-shadow:5px 5px 0 var(--shade)}
-  .modecard:hover{background:var(--ochre-l)}
+  .modecard:hover{background:var(--blue-l)}
   .modecard b{display:block;font-size:24px;letter-spacing:-.03em;font-weight:800}
-  .modecard .n{display:block;font-size:13.5px;color:var(--rust);font-weight:800;margin:3px 0 8px;
+  .modecard .n{display:block;font-size:13.5px;color:var(--blue);font-weight:800;margin:3px 0 8px;
     letter-spacing:.02em}
   .modecard .d{display:block;font-size:14.5px;color:var(--dim)}
 </style>
@@ -201,7 +202,7 @@
   .crew-plate b{display:block;font-size:16px;font-weight:800;letter-spacing:-.02em}
   .crew-plate i{font-style:normal;font-size:11.5px;opacity:.78;font-weight:600}
   .crew-body{flex:1;padding:16px 18px;min-width:0;display:flex;flex-direction:column;
-    justify-content:center;background:var(--ochre-l)}
+    justify-content:center;background:var(--blue-l)}
   .crew-body .line{font-size:18px;line-height:1.58;font-weight:600;letter-spacing:-.015em}
   @media(max-width:560px){
     .crew-pic{width:96px;flex:0 0 96px}
@@ -218,7 +219,7 @@
     box-shadow:4px 4px 0 var(--shade)}
   .optlist button b{display:block;font-size:17.5px;font-weight:800;letter-spacing:-.02em}
   .optlist button .why{display:block;font-size:14.5px;color:var(--dim);margin-top:3px}
-  .optlist button:hover{background:var(--teal-l);border-color:var(--teal)}
+  .optlist button:hover{background:var(--blue-l);border-color:var(--blue)}
 
   /* 선택지에 붙는 효과 칩 — 고르기 전에 뭘 얻고 잃는지 보인다 */
   .fx{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
@@ -233,7 +234,7 @@
   .verdict{padding:22px 20px 8px;text-align:center}
   .vlabel{font-size:12.5px;color:var(--dim);letter-spacing:.14em;font-weight:800}
   .vchoice{font-size:28px;font-weight:800;letter-spacing:-.035em;margin:6px 0 16px;
-    color:var(--rust);line-height:1.25}
+    color:var(--blue);line-height:1.25}
   .vwho{display:inline-flex;align-items:center;gap:10px;margin:0 0 12px}
   .vwho img{width:46px;height:46px;object-fit:cover;border:2px solid var(--ink);display:block}
   .vwho .em{width:46px;height:46px;display:grid;place-items:center;font-size:24px;
@@ -269,4 +270,8 @@
     .vchoice{font-size:24px}
     .big{font-size:40px}
   }
+</style>
+<style>
+  .modecard.on{background:var(--blue-l);border-color:var(--blue);box-shadow:5px 5px 0 var(--blue)}
+  .modecard.on b{color:var(--blue)}
 </style>

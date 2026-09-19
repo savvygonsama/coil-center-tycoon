@@ -287,7 +287,7 @@ function createInitialState(opt = {}) {
     equity,
     paidIn: equity,
 
-    morale: 70, trust: 65, lossStreak: 0,
+    morale: 70, trust: opt.trust ?? 65, lossStreak: 0,
     myShare: opt.myShare ?? 0.10,
     effortQueue: [],     // 영업 투자 지연 큐
 

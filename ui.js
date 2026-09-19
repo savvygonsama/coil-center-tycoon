@@ -30,7 +30,17 @@ function face(p) {
 const COUNTRIES = {
   NV: { name: '노바리아', emoji: '🏳️', desc: '자동차 산업이 막 커지기 시작한 가상의 신흥국입니다.' },
 };
-const SETUP = { country: 'NV', lines: ['SLIT', 'LEVEL'], equity: 65_000_000 };
+/* 난이도. 하드는 자본도 얇고 물려받은 판매 기반도 작다.
+   같은 판단을 해도 실수 한 번의 값이 다르다. */
+const DIFF = {
+  normal: { key:'normal', name:'노멀', equity:65_000_000, share:0.10, debtRate:0.60,
+    target:45_000_000, trust:65,
+    desc:'자본금 $65M. 본사가 붙여준 판매 기반도 넉넉합니다. 판단을 배우기에 좋습니다.' },
+  hard:   { key:'hard',   name:'하드', equity:55_000_000, share:0.082, debtRate:0.55,
+    target:58_000_000, trust:55,
+    desc:'자본금 $55M. 은행 한도도 좁고 물려받은 고객도 적습니다. 첫 1년을 버티는 것부터 일입니다.' },
+};
+const SETUP = { country: 'NV', lines: ['SLIT', 'LEVEL'], diff: 'normal' };
 
 let G = null;
 
@@ -41,15 +51,17 @@ let G = null;
 
 /* ---------- 시작 ---------- */
 function newGame(opt) {
+  const D = DIFF[opt.diff] || DIFF.normal;
   const s = createInitialState({
     seed: (Math.random() * 1e9) | 0,
-    equity: opt.equity, debtLimit: Math.round(opt.equity * 0.6),
+    equity: D.equity, debtLimit: Math.round(D.equity * D.debtRate),
+    myShare: D.share, trust: D.trust,
     lines: opt.lines, country: opt.country, companyName: opt.name,
   });
   /* 노멀은 매달, 속성은 분기마다 결재한다. 속성은 카드 한 벌로 석 달을 한 번에 돌린다.
      48개월 ÷ 3 = 16번이면 끝난다. */
   const mpt = opt.mode === 'quick' ? 3 : 1;
-  G = { s, mode: opt.mode || 'normal', mpt,
+  G = { s, mode: opt.mode || 'normal', mpt, diff: D,
         ui: { cover: 1, hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0 },
         pending: [], seen: {}, cards: {}, picks: {},
         turnDiscount: 0, yieldPenalty: 0, extraFixed: 0 };
@@ -129,6 +141,8 @@ function dealTurn() {
     bag.push(() => { const ok = put('cust', customerCard(s)); if (ok) G.lastCust = s.turn; return ok; });
   bag.push(() => put('sales', draw('sales')));
   bag.push(() => put('prod', draw('prod')));
+  // 사내 이야기는 가끔. 매달 나오면 그것도 금방 식상해진다.
+  if (Math.random() < 0.34) bag.push(() => put('life', draw('life')));
   for (let i = bag.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [bag[i], bag[j]] = [bag[j], bag[i]];
@@ -248,7 +262,7 @@ function cardCtx(s) {
   return { load, tight: load > 0.97, idle: load < 0.55, pmTrend };
 }
 
-const DECK_LABEL = { buy: '구매', cust: '영업 · 고객 개척', sales: '영업', prod: '생산', op: '운영', big: '주요 사건' };
+const DECK_LABEL = { buy: '구매', cust: '영업 · 고객 개척', sales: '영업', prod: '생산', op: '운영', life: '사내', big: '주요 사건' };
 
 /* 매달 영업 인력을 어느 고객군에 붙일지. 결실은 석 달 뒤. */
 function customerCard(s) {
@@ -437,30 +451,48 @@ function render() {
 
 function renderSetup() {
   const machine = SETUP.lines.reduce((a, t) => a + CFG.LINE[t].capex, 0);
-  const rest = SETUP.equity - CFG.INFRA_TOTAL - machine;
+  const D = DIFF[SETUP.diff] || DIFF.normal;
+  const rest = D.equity - CFG.INFRA_TOTAL - machine;
   const country = COUNTRIES[SETUP.country];
+  const diffBtn = d => `<button data-diff="${d.key}" class="modecard ${SETUP.diff === d.key ? 'on' : ''}">
+      <b>${SETUP.diff === d.key ? '✓ ' : ''}${d.name}</b>
+      <span class="n">자본금 ${M(d.equity)} · 판매 기반 ${(d.share * 100).toFixed(1)}%</span>
+      <span class="d">${d.desc}</span></button>`;
+
   app.innerHTML = `
     <h1>코일센터 경영 시뮬레이터</h1>
     <p class="sub">2026년 1월, 해외 코일센터 사장으로 부임합니다. 4년 동안 호황 · 공급과잉 · 불황 · 회복이
       한 번씩 오는데, 순서와 길이는 판마다 다릅니다.</p>
+
+    <div class="card">
+      <h2>난이도</h2>
+      <div class="modes">${diffBtn(DIFF.normal)}${diffBtn(DIFF.hard)}</div>
+      <p class="hint">하드는 통장도 얇고 은행 한도도 좁습니다. 본사가 요구하는 이익 목표는
+        ${M(DIFF.normal.target)}에서 <b>${M(DIFF.hard.target)}</b>로 올라갑니다.
+        S등급은 거의 안 나옵니다.</p>
+    </div>
+
     <div class="card">
       <div class="say"><div class="face">${face('han')}</div><div class="bubble">
         <span class="who">${CAST.han.name} · ${CAST.han.role}</span>
-        사장님, 법인은 이미 세워져 있습니다. 모두 같은 조건에서 출발합니다. 이름만 정해주시면 됩니다.</div></div>
+        사장님, 법인은 이미 세워져 있습니다. 숫자는 여기 정리해뒀습니다. 이름만 정해주시면 됩니다.</div></div>
       <table>
         <tr><td>진출 국가</td><td>${country.emoji} ${country.name} <span class="muted">— ${country.desc}</span></td></tr>
         <tr><td>설비</td><td>슬리터 1기 (연 10만톤) + 레벨러 1기 (연 5만톤)</td></tr>
-        <tr><td>자본금</td><td>${money(SETUP.equity)}</td></tr>
+        <tr><td>자본금</td><td>${money(D.equity)}</td></tr>
         <tr><td>토지·공장동</td><td>−${fmt(CFG.INFRA_TOTAL)}</td></tr>
         <tr><td>설비 2라인</td><td>−${fmt(machine)}</td></tr>
         <tr class="tot"><td>개업 후 통장</td><td>${money(rest)}</td></tr>
+        <tr><td>은행 한도</td><td>${money(Math.round(D.equity * D.debtRate))}</td></tr>
       </table>
-      <p class="hint">은행 운전자본 한도는 재고와 매출채권의 70%까지 붙습니다. 공장동 하나에 3라인까지 들어갑니다.</p>
+      <p class="hint">한도는 재고와 매출채권의 70%까지 붙습니다. 공장동 하나에 3라인까지 들어갑니다.</p>
       <label class="row"><div class="lab"><span>회사 이름</span></div>
         <input id="nm" placeholder="예: 한빛 코일센터"
-          style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:var(--panel);color:var(--ink)"></label>
-      <div class="sep"></div>
-      <h2>어느 쪽으로 하시겠습니까</h2>
+          style="width:100%;padding:11px 13px;border:2px solid var(--ink);font:inherit;background:var(--panel);color:var(--ink)"></label>
+    </div>
+
+    <div class="card">
+      <h2>결재 주기</h2>
       <div class="modes">
         <button id="go-normal" class="modecard">
           <b>노멀</b>
@@ -476,6 +508,10 @@ function renderSetup() {
         </button>
       </div>
     </div>`;
+
+  app.querySelectorAll('[data-diff]').forEach(b => b.onclick = () => {
+    SETUP.diff = b.dataset.diff; renderSetup();
+  });
   const start = mode => newGame({ ...SETUP, mode, name: $('#nm').value.trim() || '노바리아 코일센터' });
   $('#go-normal').onclick = () => start('normal');
   $('#go-quick').onclick = () => start('quick');
@@ -693,8 +729,8 @@ function metricsPanel(s) {
   if (!R) return `<div class="card metrics"><h2>경영지표</h2>
     <p class="hint">${periodNow()} 결산이 끝나면 여기에 실적이 쌓입니다.</p></div>`;
   const t = v => fmt(v) + 't';
+  // 돈은 전부 천달러(k$)로 통일한다. 단위가 섞이면 비교가 안 된다.
   const K = v => (v < 0 ? '−$' : '$') + fmt(Math.abs(v) / 1000) + 'k';
-  const Mm = v => M(v);
   // inv: 늘어나면 나쁜 지표 (장기재고·지연채권·차입금)
   const row = (label, cur, cum, prev, f, cls = '', inv = false) => {
     const d = prev == null ? null : cur - prev;
@@ -708,22 +744,22 @@ function metricsPanel(s) {
   return `<div class="card metrics">
     <h2>경영지표 · ${n > 1 ? periodLabel(R.firstTurn || R.turn, 3) : R.date}</h2>
     <table>
-      <tr><th></th><th>${CUR}</th><th>누계</th><th>${PRV}</th></tr>
+      <tr><th>금액 단위 : 천달러 (k$)</th><th>${CUR}</th><th>누계</th><th>${PRV}</th></tr>
       ${row('판매량', tot(R.sales), tot(R.cum.sales), sp && tot(sp), t, 'tot')}
       ${row('통코일', R.sales.C2C, R.cum.sales.C2C, sp && sp.C2C, t, 'sub')}
       ${row('가공 · 슬리팅', R.sales.SLIT, R.cum.sales.SLIT, sp && sp.SLIT, t, 'sub')}
       ${row('가공 · 레벨러', R.sales.LEVEL, R.cum.sales.LEVEL, sp && sp.LEVEL, t, 'sub')}
       ${row('가공 · 블랭킹', R.sales.BLANK, R.cum.sales.BLANK, sp && sp.BLANK, t, 'sub')}
-      ${row('매출액', R.revenue, R.cum.revenue, P && P.revenue, Mm, 'tot')}
+      ${row('매출액', R.revenue, R.cum.revenue, P && P.revenue, K, 'tot')}
       ${row('영업이익', R.op, R.cum.op, P && P.op, K, 'tot')}
       ${row('순이익', R.np, R.cum.np, P && P.np, K)}
       <tr class="head"><th colspan="4">월말 잔액</th></tr>
       ${row('재고량', R.bs.invTons, null, bp && bp.invTons, t)}
       ${row('장기재고 (3개월 초과)', R.bs.longTons, null, bp && bp.longTons, t, '', true)}
-      ${row('매출채권', R.bs.ar, null, bp && bp.ar, Mm)}
-      ${row('지연채권', R.bs.arDelayed, null, bp && bp.arDelayed, Mm, '', true)}
-      ${row('차입금', R.bs.debt, null, bp && bp.debt, Mm, '', true)}
-      ${row('순운전자본', R.bs.nwc, null, bp && bp.nwc, Mm, 'tot')}
+      ${row('매출채권', R.bs.ar, null, bp && bp.ar, K)}
+      ${row('지연채권', R.bs.arDelayed, null, bp && bp.arDelayed, K, '', true)}
+      ${row('차입금', R.bs.debt, null, bp && bp.debt, K, '', true)}
+      ${row('순운전자본', R.bs.nwc, null, bp && bp.nwc, K, 'tot')}
     </table></div>`;
 }
 
@@ -882,7 +918,7 @@ function showReport(R) {
 }
 
 function renderEnd() {
-  const g = grade(G.s), s = G.s, hist = s.history;
+  const g = grade(G.s, (G.diff || DIFF.normal).target), s = G.s, hist = s.history;
   const best = hist.reduce((a, h) => h.op > a.op ? h : a, hist[0] || { op: 0, turn: 0 });
   const worst = hist.reduce((a, h) => h.op < a.op ? h : a, hist[0] || { op: 0, turn: 0 });
   app.innerHTML = `
