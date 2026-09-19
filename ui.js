@@ -68,36 +68,74 @@ function newGame(opt) {
     }
   }
 
-  dealTurn(); openDecisions();
+  render();
 }
 
-/* 이번 달 결재판을 짠다. 구매·영업·생산에서 한 장씩, 그리고 정해진 달에는 대형 사건.
-   카드는 한 장씩 팝업으로 올라오고, 고르는 즉시 결과가 나온다. */
+/* 이번 달에 누가 들어올지 짠다.
+   원칙 셋 — 같은 주제로 두 번 묻지 않는다.
+             최근에 나온 카드는 뒤로 미룬다.
+             운영 결정(증설·본사 지시·슬리팅)은 있을 때만, 한 달에 하나만. */
 function dealTurn() {
   G.trim = trimOptions(Math.random);
   G.trimPick = 0;
   G.cards = {}; G.picks = {};
   G.queue = []; G.qi = 0; G.mult = 1; G.done = [];
-  const ctx = cardCtx(G.s);
-  const big = G.bigPlan && G.bigPlan[G.s.turn];
-  if (big) G.queue.push({ deck: 'big', card: big });
-  const draw = (deck, skip = []) => {
-    const pool = DECK[deck].filter(c => !skip.includes(c.id) && (!c.when || c.when(G.s, ctx)));
-    const fresh = pool.filter(c => (G.s.turn - (G.seen[c.id] || -99)) > 5);
-    const use = fresh.length ? fresh : pool;
-    if (!use.length) return null;
-    const card = use[Math.floor(Math.random() * use.length)];
-    G.seen[card.id] = G.s.turn;
-    return card;
+
+  const s = G.s, ctx = cardCtx(s), used = new Set();
+  const put = (deck, card) => {
+    if (!card) return false;
+    const t = card.topic || deck;
+    if (used.has(t)) return false;
+    used.add(t);
+    if (card.id) G.seen[card.id] = s.turn;
+    G.queue.push({ deck, card });
+    return true;
   };
-  G.queue.push({ deck: 'buy', card: draw('buy') });
-  // 영업은 매달 반드시 고객군을 고른다. 여기에 가끔 영업 사건이 하나 더 붙는다.
-  G.queue.push({ deck: 'cust', card: customerCard(G.s) });
-  if (Math.random() < 0.45) {
-    const c = draw('sales', ['s-visit', 's-newcust']);   // 고객 선택 카드와 겹치는 것은 뺀다
-    if (c) G.queue.push({ deck: 'sales', card: c });
+
+  // 오래 안 나온 것부터 고른다. 같은 카드가 다음 달에 또 나오지 않게.
+  const draw = (deck) => {
+    const pool = DECK[deck].filter(c =>
+      !used.has(c.topic || deck) && (!c.when || c.when(s, ctx)));
+    if (!pool.length) return null;
+    pool.sort((a, b) => (G.seen[a.id] ?? -99) - (G.seen[b.id] ?? -99));
+    const oldHalf = Math.max(1, Math.ceil(pool.length / 2));
+    return pool[Math.floor(Math.random() * oldHalf)];
+  };
+
+  // 1. 큰 사건이 있으면 그것부터 — 그 달의 주인공이다
+  const big = G.bigPlan && G.bigPlan[s.turn];
+  if (big) put('big', big);
+
+  // 2. 소재 발주는 매달. 이 게임의 심장이라 빠질 수 없다.
+  put('buy', draw('buy'));
+
+  // 3. 운영 결정 — 있을 때만, 하나만
+  const L = look(s);
+  const ops = [];
+  if (L.isBust && L.quota > 0) ops.push(hqCard(L, s));
+  const ex = s.lines.length < CFG.MAX_LINES
+    ? (L.gapSlit > 800 ? 'SLIT' : L.gapLevel > 500 ? 'LEVEL'
+      : (s.turn > 10 && !s.lines.some(l => l.type === 'BLANK') ? 'BLANK' : null)) : null;
+  if (ex && !(s.buildQueue || []).length && (s.turn - (G.seen['op-expand'] ?? -99)) > 6)
+    ops.push(expandCard(ex, L, s));
+  if (G.trim && s.lines.some(l => l.type === 'SLIT') && (s.turn - (G.seen['op-trim'] ?? -99)) > 5)
+    ops.push(trimCard());
+  if (ops.length) put('op', ops[Math.floor(Math.random() * ops.length)]);
+
+  // 4. 사람 이야기 — 영업·생산·고객에서 두 장. 매달 조합이 바뀐다.
+  const custGap = G.mpt > 1 ? 1 : 3;
+  const bag = [];
+  if ((s.turn - (G.lastCust ?? -99)) >= custGap)
+    bag.push(() => { const ok = put('cust', customerCard(s)); if (ok) G.lastCust = s.turn; return ok; });
+  bag.push(() => put('sales', draw('sales')));
+  bag.push(() => put('prod', draw('prod')));
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bag[i], bag[j]] = [bag[j], bag[i]];
   }
-  G.queue.push({ deck: 'prod', card: draw('prod') });
+  let got = 0;
+  for (const f of bag) { if (got >= 2) break; if (f()) got++; }
+  if (!got) put('prod', draw('prod'));
 }
 
 /* ---------- 결재 팝업: 카드 한 장씩, 고르면 바로 결과 ---------- */
@@ -115,23 +153,49 @@ function deltaChips(a, b) {
   return out.join(' ');
 }
 
+/* 효과 칩 — 고르기 전에 뭘 얻고 뭘 잃는지 보인다.
+   앞 글자로 색을 정한다. + 이득 / − 손해 / ? 도박 / = 중립 */
+function fxChips(list) {
+  if (!list || !list.length) return '';
+  return `<div class="fx">${list.map(t => {
+    const k = t[0];
+    const cls = k === '+' ? 'up' : k === '−' || k === '-' ? 'dn' : k === '?' ? 'rsk' : 'neu';
+    const body = '+−-?='.includes(k) ? t.slice(1) : t;
+    const mark = k === '?' ? '⚠ ' : '';
+    return `<span class="${cls}">${mark}${body}</span>`;
+  }).join('')}</div>`;
+}
+
+/* 직원 얼굴 + 명패 + 말 */
+function crewBlock(who) {
+  const pic = who.img
+    ? `<img src="art/${who.img}.jpg" alt="">`
+    : `<div class="emoji">${who.face}</div>`;
+  return `<div class="crew-pic">${pic}
+    <div class="crew-plate"><b>${who.name}</b><i>${who.role}</i></div></div>`;
+}
+
 function openDecisions() {
-  if (!G.queue || G.qi >= G.queue.length) { render(); return; }
+  // 오늘 결재가 끝났으면 바로 한 달을 보낸다. 공장에 다시 들를 일이 없다.
+  if (!G.queue || G.qi >= G.queue.length) { advance(); return; }
+
   const { deck, card } = G.queue[G.qi];
-  const who = CAST[card.who];
+  const who = CAST[card.who] || CAST.han;
   const dlg = document.createElement('dialog');
   dlg.className = 'deck';
-  const head = `<div class="dlgtop">
-      <span class="tag">${periodNow()} · ${DECK_LABEL[deck]}</span>
-      <span class="muted" style="font-size:12px">${G.qi + 1} / ${G.queue.length}</span></div>`;
+
+  const head = `<div class="deckhead">
+    <span>${periodNow()} · ${DECK_LABEL[deck] || '결재'}</span>
+    <span class="step">${G.qi + 1} / ${G.queue.length}</span></div>`;
 
   const ask = () => {
     dlg.innerHTML = `<div class="dlg">${head}
-      <h2 style="font-size:19px;margin:10px 0 12px">${card.title}</h2>
-      <div class="say"><div class="face">${face(who)}</div><div class="bubble">
-        <span class="who">${who.name} · ${who.role}</span>${card.text}</div></div>
+      <div class="crew">${crewBlock(who)}
+        <div class="crew-body"><div class="line">${card.text}</div></div></div>
+      <div class="deckq"><h2>${card.title}</h2></div>
       <div class="optlist">${card.opts.map((o, i) => `
-        <button data-o="${i}"><b>${o.label}</b>${o.hint ? `<span>${o.hint}</span>` : ''}</button>`).join('')}</div>
+        <button data-o="${i}"><b>${o.label}</b>${
+          o.hint ? `<span class="why">${o.hint}</span>` : ''}${fxChips(o.fx)}</button>`).join('')}</div>
     </div>`;
     dlg.querySelectorAll('[data-o]').forEach(b => b.onclick = () => choose(+b.dataset.o));
   };
@@ -143,26 +207,32 @@ function openDecisions() {
     if (o.apply) msg = o.apply(G.s, G) || '';
     if (o.mult) G.mult *= o.mult;
     if (o.ot) G.ui.overtime = true;
-    const after = snap(G.s);
-    const chips = deltaChips(before, after);
+    const chips = deltaChips(before, snap(G.s));
     G.done.push({ deck, title: card.title, choice: o.label, msg });
     if (msg) G.resultLines = (G.resultLines || []).concat(msg);
 
+    const last = G.qi + 1 >= G.queue.length;
+    const pic = who.img ? `<img src="art/${who.img}.jpg" alt="">`
+                        : `<div class="em">${who.face}</div>`;
     dlg.innerHTML = `<div class="dlg">${head}
       <div class="verdict">
         <div class="vlabel">사장님의 결정</div>
         <div class="vchoice">${o.label}</div>
-        ${msg ? `<p class="vmsg">${msg}</p>` : ''}
+        ${msg ? `<div class="vwho">${pic}<span>${who.name}</span></div>
+                 <p class="vmsg">${msg}</p>` : ''}
         ${chips ? `<div class="chips">${chips}</div>` : ''}
-        ${o.mult ? `<div class="chips"><span class="chip ${o.mult >= 1 ? 'up' : 'down'}">이번 달 발주 ×${o.mult}</span></div>` : ''}
+        ${o.mult && o.mult !== 1 ? `<div class="chips"><span class="chip ${o.mult >= 1 ? 'up' : 'down'}">
+          이번 달 소재 발주 ×${o.mult}</span></div>` : ''}
       </div>
-      <div class="ok"><button class="primary" id="nx">
-        ${G.qi + 1 < G.queue.length ? '다음 결재' : '공장으로'}</button></div></div>`;
+      <div class="vfoot"><button class="primary" id="nx">${
+        last ? (G.mpt > 1 ? '석 달 보내기' : '한 달 보내기') : '다음 결재'}</button></div></div>`;
     dlg.querySelector('#nx').onclick = () => {
       dlg.close(); dlg.remove(); G.qi++; openDecisions();
     };
   };
 
+  // ESC로 닫으면 결재 흐름이 끊긴다. 반드시 고르고 나가야 한다.
+  dlg.addEventListener('cancel', e => e.preventDefault());
   document.body.appendChild(dlg);
   ask();
   dlg.showModal();
@@ -178,22 +248,25 @@ function cardCtx(s) {
   return { load, tight: load > 0.97, idle: load < 0.55, pmTrend };
 }
 
-const DECK_LABEL = { buy: '구매', cust: '영업 · 고객 개척', sales: '영업', prod: '생산', big: '주요 사건' };
+const DECK_LABEL = { buy: '구매', cust: '영업 · 고객 개척', sales: '영업', prod: '생산', op: '운영', big: '주요 사건' };
 
 /* 매달 영업 인력을 어느 고객군에 붙일지. 결실은 석 달 뒤. */
 function customerCard(s) {
   const when = dateLabel(s.turn + CFG.SALES_EFFORT_LAG);
   return {
-    id: 'cust', who: 'jung',
-    title: '이번 달 어느 고객군에 공을 들이시겠습니까',
-    text: `영업 인력은 한정돼 있습니다. 한 곳을 골라 붙겠습니다. 결실은 ${when}쯤 봅니다.
-           손 놓은 고객군은 조금씩 빠져나갑니다.`,
+    id: 'cust', who: 'jung', topic: 'cust',
+    title: '어느 고객군에 붙을까요',
+    text: `영업 인력이 몇 명이나 된다고요. 한 군데 골라서 제대로 붙는 게 낫습니다. `
+        + `대신 손 놓은 쪽은 조금씩 빠져나갑니다. 그건 각오하셔야 해요. `
+        + `결과는 ${when}쯤 나옵니다. 그때까지는 아무 일도 안 일어납니다.`,
     opts: Object.entries(CFG.CUSTOMERS).map(([k, c]) => ({
-      label: `${c.emoji} ${c.name} — 지금 ${((s.custShare[k] || 0) * 100).toFixed(0)}%`,
-      hint: `＋ ${c.good}  ／  － ${c.bad_}`,
+      label: `${c.emoji} ${c.name}`,
+      hint: `지금 우리 거래의 ${((s.custShare[k] || 0) * 100).toFixed(0)}%`,
+      fx: [`+${c.good}`, `−${c.bad_}`],
       apply: (st, g) => {
         g.ui.custFocus = k;
-        return `${c.name}에 영업을 붙였습니다. ${when}쯤 거래 비중이 늘어납니다.`;
+        return `${c.name} 쪽에 붙었습니다. ${when}쯤부터 거래 비중이 올라옵니다. `
+             + `대신 다른 고객군은 그동안 조금씩 빠집니다.`;
       },
     })),
   };
@@ -408,6 +481,10 @@ function renderSetup() {
   $('#go-quick').onclick = () => start('quick');
 }
 
+/* ============================================================
+   공장 화면 — 브리핑만 한다. 여기서는 아무것도 결정하지 않는다.
+   상황을 보고, 준비가 되면 직원들을 부른다.
+   ============================================================ */
 function renderPlay() {
   const s = G.s, ui = G.ui;
   const d = buildDecision(s, ui), L = d._L;
@@ -416,16 +493,13 @@ function renderPlay() {
   const coverNow = L.need > 0 ? (stock + transit) / L.need : 0;
   const canBorrow = s.debt.limit - s.debt.principal;
   const last = s.history[s.history.length - 1];
-  const expandable = s.lines.length < CFG.MAX_LINES
-    ? (L.gapSlit > 800 ? 'SLIT' : L.gapLevel > 500 ? 'LEVEL' : (s.lines.some(l => l.type === 'BLANK') ? null : 'BLANK')) : null;
-  const spendNow = (ui.overtime ? CFG.OT_COST : 0);
 
   app.innerHTML = `
     <div class="hud">
       <div class="stat"><div class="k">${s.companyName}</div>
-        <div class="v" style="font-size:15px">${periodNow()}
-          <span class="muted" style="font-size:11px">${periodIndex()}/${periodTotal()}</span></div></div>
-      <div class="stat"><div class="k">시황</div><div class="v" style="font-size:15px">
+        <div class="v" style="font-size:16px">${periodNow()}
+          <span class="muted" style="font-size:12px">${periodIndex()}/${periodTotal()}</span></div></div>
+      <div class="stat"><div class="k">시황</div><div class="v" style="font-size:16px">
         <span class="phase ph-${s.market.phase}">${ph.label}</span></div></div>
       <div class="stat"><div class="k">소재 시세</div><div class="v">$${fmt(s.market.pm)}</div></div>
       <div class="stat"><div class="k">통장</div><div class="v ${s.cash < 3e6 ? 'neg' : ''}">${M(s.cash)}</div></div>
@@ -436,16 +510,22 @@ function renderPlay() {
       <div class="stat"><div class="k">직원 사기</div><div class="v">${Math.round(s.morale)}</div></div>
     </div>
 
-    <div class="card" style="padding:12px 16px;border-color:#ddd3c2;background:#fbf7ee">
-      <b>${chapterOf(s, s.turn).label}</b>
-      <span class="muted" style="font-size:13px"> · ${chapterOf(s, s.turn).brief}</span>
+    <div class="card" style="background:var(--ochre-l)">
+      <b style="font-size:19px">${chapterOf(s, s.turn).label}</b>
+      <span class="muted" style="font-size:15px"> · ${chapterOf(s, s.turn).brief}</span>
       ${(s.buildQueue || []).length ? `<div class="note">${(s.buildQueue || []).map(b =>
-        `${CFG.LINE[b.type].label} 설치 중 — ${b.readyTurn}월부터 가동`).join(' · ')}</div>` : ''}
+        `${CFG.LINE[b.type].label} 설치 중 — ${dateLabel(b.readyTurn)}부터 가동`).join(' · ')}</div>` : ''}
+    </div>
+
+    <div class="card" style="padding:14px 14px 10px">${plantView(s, L)}</div>
+
+    <div class="center" style="margin:6px 0 26px">
+      <button class="primary" id="go">직원들 들어오라고 하기</button>
+      <p class="hint" style="margin-top:10px">${periodNow()} 결재를 시작합니다.
+        직원들이 한 명씩 들어와 상황을 보고하고, 사장님이 정하면 그대로 집행됩니다.</p>
     </div>
 
     ${metricsPanel(s)}
-
-    <div class="card" style="padding:10px 10px 4px">${plantView(s, L)}</div>
 
     ${custPanel(s)}
 
@@ -453,7 +533,7 @@ function renderPlay() {
       <div class="card">
         <h2>이번 달 본사 주문</h2>
         ${bars(L.now, L.c)}
-        <table style="margin-top:12px"><tr><th>받아둔 주문</th>${s.nasi.map(x => `<th>${x.turn}월</th>`).join('')}</tr>
+        <table style="margin-top:14px"><tr><th>받아둔 주문</th>${s.nasi.map(x => `<th>${x.turn}월</th>`).join('')}</tr>
           <tr><td>슬리팅</td>${s.nasi.map(x => `<td>${fmt(x.tons.SLIT)}</td>`).join('')}</tr>
           <tr><td>레벨링</td>${s.nasi.map(x => `<td>${fmt(x.tons.LEVEL)}</td>`).join('')}</tr>
           <tr><td>통코일</td>${s.nasi.map(x => `<td>${fmt(x.tons.C2C)}</td>`).join('')}</tr></table>
@@ -486,36 +566,9 @@ function renderPlay() {
       </div>
     </div>
 
-    ${decisionsMade()}
-    ${trimCard()}
-    ${L.isBust ? hqOfferCard(L, ui) : ''}
-    ${expandable ? expandCard(expandable, L, s, ui) : ''}
+    ${decisionsMade()}`;
 
-    <div class="card">
-      <h2>${G.mpt > 1 ? '이번 분기 지시' : '이번 달 지시'}</h2>
-      <div class="say"><div class="face">${face('seo')}</div><div class="bubble">
-        <span class="who">${CAST.seo.name} · ${CAST.seo.role}</span>
-        넉 달 뒤에 쓸 소재를 지금 시킵니다. 얼마나 여유를 두시겠습니까.${
-          G.mpt > 1 ? ' 이 방침대로 석 달을 갑니다.' : ''}</div></div>
-      <label class="row"><div class="lab"><span>소재 발주</span>
-          <b>${fmt(d._buyTon)}톤 · ${money(d._buyTon * s.market.pm)}</b></div>
-        <input type="range" id="cov" min="0" max="2" step="0.25" value="${ui.cover}">
-        <p class="hint">리드타임 위에 ${ui.cover.toFixed(2)}개월치를 더 얹습니다. 대금은 도착 다음 달에 나갑니다.</p></label>
-
-      <table style="margin-top:14px">
-        <tr><td>이번 달 바로 나갈 돈</td><td>${money(spendNow)}</td></tr>
-        <tr class="tot"><td>통장 + 은행 한도</td>
-          <td class="${spendNow > s.cash + canBorrow ? 'v neg' : ''}">${money(s.cash + canBorrow)}</td></tr></table>
-    </div>
-
-    <div class="center" style="margin-top:20px">
-      <button class="primary" id="go">결재하고 ${G.mpt > 1 ? '석 달' : '한 달'} 보내기</button></div>`;
-
-  $('#cov').oninput = e => { G.ui.cover = +e.target.value; renderPlay(); };
-  const hq = $('#hq'); if (hq) hq.oninput = e => { G.ui.hqTake = +e.target.value; renderPlay(); };
-  app.querySelectorAll('[data-trim]').forEach(b => b.onclick = () => { G.trimPick = +b.dataset.trim; renderPlay(); });
-  app.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => { G.ui.expandPick = b.dataset.ex || null; renderPlay(); });
-  $('#go').onclick = advance;
+  $('#go').onclick = () => { dealTurn(); openDecisions(); };
 }
 
 /* 재고 나이 — 같은 18,000톤이라도 전부 한 달짜리인 것과
@@ -537,31 +590,96 @@ function agingPanel(s) {
 }
 
 /* 이번 달 슬리팅 배분 — 코일센터에서만 나오는 결정 */
+/* ============================================================
+   운영 결정도 사람이 들고 들어온다.
+   화면에 슬라이더로 박아두지 않고, 그 달에 필요할 때만 카드로 올린다.
+   ============================================================ */
+
+/* 슬리팅 배분 — 원코일을 어떻게 쪼갤 것인가 */
 function trimCard() {
-  const t = G.trim;
-  if (!t) return '';
-  const base = CFG.YIELD.SLIT;
-  return `<div class="card">
-    <h2>이번 달 슬리팅 배분</h2>
-    <div class="say"><div class="face">${face('gu')}</div><div class="bubble">
-      <span class="who">${CAST.gu.name} · ${CAST.gu.role}</span>
-      원코일 폭 ${COIL_WIDTH}mm입니다. 이번 달 고객이 달라는 폭은
-      ${t.widths.map(w => w + 'mm').join(' / ')} 이렇게 셋입니다.
-      어떻게 쪼개시겠습니까. 남는 폭은 그대로 버립니다.</div></div>
-    <div class="choice">${t.options.map((o, i) => {
+  const t = G.trim, base = CFG.YIELD.SLIT;
+  return {
+    id: 'op-trim', who: 'gu', topic: 'op',
+    title: '원코일을 어떻게 쪼갤까요',
+    text: `원코일 폭 ${COIL_WIDTH}mm입니다. 이번 달 고객이 달라는 폭은 `
+        + `${t.widths.map(w => w + 'mm').join(', ')} 이렇게 셋입니다. `
+        + `남는 폭은 그대로 버립니다. 고객하고는 수율 ${(base * 100).toFixed(0)}%로 값을 정해놨으니까, `
+        + `그보다 잘 자르면 그 차액은 우리 겁니다.`,
+    opts: t.options.map((o, i) => {
       const diff = (o.yield - base) * 100;
-      return `<button data-trim="${i}" class="${G.trimPick === i ? 'on' : ''}"
-        style="text-align:left;min-width:190px">
-        <b>${t.widths.map((w, k) => o.cuts[k] ? `${w}×${o.cuts[k]}` : null)
-             .filter(Boolean).join(' + ')}</b><br>
-        <span style="font-size:12px">수율 ${(o.yield * 100).toFixed(1)}%
-          · 트림 ${o.trim}mm</span><br>
-        <span style="font-size:12px" class="${diff >= 0 ? '' : 'muted'}">
-          약속한 98% 대비 ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%p</span></button>`;
-    }).join('')}</div>
-    <p class="hint">고객과는 수율 ${(base * 100).toFixed(0)}%로 값을 정해뒀습니다.
-      그보다 잘 자르면 차액이 우리 이익이고, 못 자르면 우리가 뭅니다.</p>
-  </div>`;
+      const combo = t.widths.map((w, k) => o.cuts[k] ? `${w}×${o.cuts[k]}` : null).filter(Boolean).join(' + ');
+      return {
+        label: combo,
+        hint: `수율 ${(o.yield * 100).toFixed(1)}% · 버리는 폭 ${o.trim}mm`,
+        fx: [`${diff >= 0 ? '+' : '−'}약속 대비 ${Math.abs(diff).toFixed(1)}%p`,
+             diff >= 0 ? '+차액은 우리 이익' : '−차액은 우리가 문다'],
+        apply: (s, g) => { g.trimPick = i;
+          return diff >= 0
+            ? `${combo}로 잡았습니다. 약속한 ${(base * 100).toFixed(0)}%보다 잘 나옵니다. 그만큼 우리 이익입니다.`
+            : `${combo}로 잡았습니다. 약속한 수율에 못 미칩니다. 차액은 우리가 뭅니다.`; },
+      };
+    }),
+  };
+}
+
+/* 불황기 본사 지시 — 유통향 일반재를 얼마나 받을 것인가 */
+function hqCard(L, s) {
+  const q = Math.round(L.quota);
+  const step = Math.max(500, Math.round(q / 4 / 500) * 500);
+  const mk = (ton, label, hint, fx) => ({
+    label, hint, fx,
+    apply: (st, g) => { g.ui.hqTake = ton;
+      if (ton === 0) { st.trust -= CFG.HQ_SPOT.refuseTrustCost;
+        return '본사 지시를 거절했습니다. 본사 영업팀이 서운해합니다. 이런 건 평가 때 기억납니다.'; }
+      return `${fmt(ton)}톤을 받기로 했습니다. 이제 이걸 우리가 알아서 팔아야 합니다. `
+           + `못 팔면 창고에서 늙다가 반값에 나갑니다.`; },
+  });
+  return {
+    id: 'op-hq', who: 'jung', topic: 'op',
+    title: '본사 지시 물량을 얼마나 받을까요',
+    text: `사장님, 본사 공장이 물량을 못 채웠답니다. 유통향 일반재를 시세보다 `
+        + `${(CFG.HQ_SPOT.discount * 100).toFixed(0)}% 싸게 넘기겠다고요. 싼 건 맞습니다. `
+        + `근데 이건 고객이 정해진 물건이 아니에요. 우리가 알아서 팔아야 합니다. `
+        + `그리고 유통향은 본사 정책상 전체 판매의 15%까지밖에 못 팝니다.`,
+    opts: [
+      mk(q, '배정량 전부 받는다', `${fmt(q)}톤`,
+        ['+본사 신뢰 ↑↑', '−현금이 크게 묶임', '?15% 넘는 건 안 팔린다']),
+      mk(Math.round(q * 0.5), '절반만 받는다', `${fmt(Math.round(q * 0.5))}톤`,
+        ['+본사 체면 세움', '=팔 수 있는 만큼']),
+      mk(step, '생색만 낸다', `${fmt(step)}톤`,
+        ['+위험 최소', '−본사가 아쉬워한다']),
+      mk(0, '받지 않는다', '우리 살림부터',
+        ['+현금 지킴', `−본사 신뢰 ${CFG.HQ_SPOT.refuseTrustCost}`]),
+    ],
+  };
+}
+
+/* 증설 — 설비값보다 소재값이 훨씬 크다는 게 이 카드의 교훈 */
+function expandCard(type, L, s) {
+  const capex = CFG.LINE[type].capex;
+  const newBuild = s.lines.length >= CFG.MAX_LINES;
+  const total = capex + (newBuild ? CFG.INFRA_TOTAL : 0);
+  const feed = CFG.LINE[type].cap * 3 * s.market.pm;
+  const why = type === 'BLANK'
+    ? '블랭킹은 지금 우리한테 없는 시장입니다. 놓으면 고객이 새로 붙습니다.'
+    : `본사가 주고 싶어 하는 물량이 우리 한계를 월 ${fmt(Math.round(type === 'SLIT' ? L.gapSlit : L.gapLevel))}톤 넘습니다.`;
+  return {
+    id: 'op-expand', who: 'gu', topic: 'op',
+    title: `${CFG.LINE[type].label}를 한 대 더 놓을까요`,
+    text: `${why} ${newBuild ? '근데 자리가 없습니다. 공장동을 한 동 더 지어야 합니다. ' : '자리는 있습니다. '}`
+        + `말씀드릴 게 하나 있는데, 설비값보다 그걸 채울 소재값이 훨씬 큽니다. 석 달치만 해도 ${money(feed)}입니다.`,
+    opts: [
+      { label: '짓겠습니다', hint: `${CFG.INSTALL_TURNS}개월 뒤 가동`,
+        fx: [`−설비 ${money(total)}`, `−소재 ${money(feed)} 추가로 묶임`,
+             `+${CFG.INSTALL_TURNS}개월 뒤 캐파 ↑`],
+        apply: (st, g) => { g.ui.expandPick = type;
+          return `${CFG.LINE[type].label} 발주했습니다. ${CFG.INSTALL_TURNS}개월 뒤부터 돕니다. `
+               + `그때까지는 돈만 나갑니다.`; } },
+      { label: '이번엔 넘어갑니다', hint: '현금을 지킨다',
+        fx: ['+현금 지킴', '−이 물량은 못 받는다'],
+        apply: () => '증설은 미뤘습니다. 그 물량은 다른 데로 갑니다.' },
+    ],
+  };
 }
 
 /* ---------- 경영지표: 당월 / 누계 / 전월 대비 ---------- */
@@ -640,48 +758,14 @@ function bars(n, c) {
   }).join('')}</div><p class="hint">검은 선이 우리가 만들 수 있는 한계입니다.</p>`;
 }
 
+/* 이번 달 결재 내역 — 결재가 끝나고 결산 화면에서 돌아봤을 때 쓴다 */
 function decisionsMade() {
   if (!G.done || !G.done.length) return '';
-  return `<div class="card" style="background:#fbf8f1">
-    <h2>이번 달 결재한 것</h2>
-    <table>${G.done.map(d => `<tr><td><span class="tag">${DECK_LABEL[d.deck]}</span> ${d.title}</td>
+  return `<div class="card">
+    <h2>지난 결재</h2>
+    <table>${G.done.map(d => `<tr><td><span class="tag">${DECK_LABEL[d.deck] || '결재'}</span> ${d.title}</td>
       <td><b>${d.choice}</b></td></tr>`).join('')}</table>
   </div>`;
-}
-
-function hqOfferCard(L, ui) {
-  const pct = L.quota > 0 ? (ui.hqTake / L.quota * 100).toFixed(0) : 0;
-  return `<div class="card" style="border-color:#e0c9a8;background:#fffaf0">
-    <h2>본사에서 연락이 왔습니다</h2>
-    <div class="say"><div class="face">${face('jung')}</div><div class="bubble">
-      <span class="who">${CAST.jung.name} · ${CAST.jung.role}</span>
-      본사 공장이 물량을 못 채웠답니다. 유통향 일반재를 시세보다 <b>${(CFG.HQ_SPOT.discount * 100).toFixed(0)}% 싸게</b>
-      넘기겠다고요. 싼 건 맞는데, 이건 고객이 정해진 물건이 아닙니다. 우리가 알아서 팔아야 합니다.</div></div>
-    <label class="row"><div class="lab"><span>얼마나 받으시겠습니까</span>
-        <b>${fmt(ui.hqTake)}톤 <span class="muted" style="font-size:12px">(배정량의 ${pct}%)</span></b></div>
-      <input type="range" id="hq" min="0" max="${Math.round(L.quota)}" step="100" value="${ui.hqTake}"></label>
-    <div class="note">유통향은 본사 정책상 <b>전체 판매의 15%</b>까지만 팔 수 있습니다.
-      받은 만큼 다 팔리는 게 아닙니다. 남으면 창고에서 늙다가 반값에 나갑니다.</div>
-    ${ui.hqTake === 0 ? `<div class="note bad">안 받으면 본사와의 관계가 상합니다.</div>` : ''}</div>`;
-}
-
-function expandCard(type, L, s, ui) {
-  const on = ui.expandPick === type, capex = CFG.LINE[type].capex;
-  const newBuild = s.lines.length >= CFG.MAX_LINES;
-  const extra = type === 'BLANK' ? '지금은 없는 시장이 열립니다. 블랭킹 고객이 새로 붙습니다.'
-    : `본사가 주고 싶어 하는 물량이 우리 한계를 <b>월 ${fmt(type === 'SLIT' ? L.gapSlit : L.gapLevel)}톤</b> 넘습니다.`;
-  return `<div class="card" style="border-color:#c9d8cd;background:#f7fbf8">
-    <h2>${CFG.LINE[type].label}를 한 대 더 놓겠습니까</h2>
-    <div class="say"><div class="face">${face('gu')}</div><div class="bubble">
-      <span class="who">${CAST.gu.name} · ${CAST.gu.role}</span>
-      ${extra} ${newBuild ? '그런데 자리가 없습니다. 공장동을 한 동 더 지어야 합니다.' : '자리는 있습니다.'}</div></div>
-    <table><tr><td>설비</td><td>${money(capex)}</td></tr>
-      ${newBuild ? `<tr><td>공장동 신축</td><td>${money(CFG.INFRA_TOTAL)}</td></tr>` : ''}
-      <tr><td>이 설비를 채울 소재 (석 달치)</td><td>${money(CFG.LINE[type].cap * 3 * s.market.pm)}</td></tr></table>
-    <div class="note">설비값보다 <b>소재값이 훨씬 큽니다.</b> 라인을 늘리면 그만큼 창고와 바다에 돈이 더 잠깁니다.</div>
-    <div class="choice" style="margin-top:12px">
-      <button data-ex="${type}" class="${on ? 'on' : ''}">${on ? '✓ ' : ''}짓겠습니다</button>
-      <button data-ex="" class="${!on ? 'on' : ''}">${!on ? '✓ ' : ''}이번엔 넘어갑니다</button></div></div>`;
 }
 
 /* ---------- 한 달 보내기 ---------- */
@@ -788,12 +872,12 @@ function showReport(R) {
     ${lines.length ? `<div class="sep"></div>${lines.map(t =>
       `<div class="note ${/결품|넘겼|막혀|모자|대손|떠나|부도|클레임|넘어갔|나갔/.test(t) ? 'bad' : ''}">${t}</div>`).join('')}` : ''}
     <div class="ok"><button class="primary" id="close">확인</button></div></div>`;
+  dlg.addEventListener('cancel', e => e.preventDefault());
   document.body.appendChild(dlg);
   dlg.showModal();
   dlg.querySelector("#close").onclick = () => {
     dlg.close(); dlg.remove();
-    if (G.s.over) return render();
-    dealTurn(); openDecisions();
+    render();
   };
 }
 
