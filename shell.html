@@ -156,3 +156,24 @@
   .modecard .n{display:block;font-size:12px;color:var(--accent);font-weight:700;margin:2px 0 6px}
   .modecard .d{display:block;font-size:12.5px;color:var(--dim)}
 </style>
+<style>
+  /* 공장 전경 — 레이어 합성 */
+  .plantwrap{position:relative;width:100%;max-width:720px;margin:0 auto;aspect-ratio:1/1;
+    border-radius:12px;overflow:hidden;background:#dfe6ec;user-select:none}
+  .plbase{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+  .pl{position:absolute;transform:translate(-50%,-100%);display:block;pointer-events:auto}
+  .pltag{position:absolute;transform:translate(-50%,0);z-index:90;white-space:nowrap;
+    background:rgba(255,253,248,.92);border:1px solid var(--line);border-radius:99px;
+    padding:1px 8px;font-size:11px;font-weight:700;color:var(--ink);
+    font-variant-numeric:tabular-nums;box-shadow:0 1px 3px rgba(40,34,24,.18)}
+  .pltag.on{background:rgba(63,125,104,.94);border-color:#356957;color:#fff}
+  .pltag.hot{background:rgba(200,98,46,.95);border-color:#a04d22;color:#fff}
+  .pltag.off{background:rgba(247,244,237,.92);color:var(--dim)}
+  .pltag.bad{background:rgba(184,68,58,.95);border-color:#93352d;color:#fff}
+  .pltag.wip{background:rgba(255,248,230,.95);border-color:#e0cf9e;color:#8a6d1f}
+  @media(max-width:560px){ .pltag{font-size:10px;padding:0 6px} }
+
+  /* 말풍선 초상 */
+  .face{overflow:hidden;padding:0}
+  .facepic{width:100%;height:100%;object-fit:cover;display:block}
+</style>

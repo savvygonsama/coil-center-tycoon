@@ -10,13 +10,20 @@ const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
 const M = n => (n < 0 ? '−$' : '$') + (Math.abs(n) / 1e6).toFixed(1) + 'M';
 
 const CAST = {
-  seo:  { face: '📋', name: '서 대리', role: '구매' },
-  jung: { face: '📞', name: '정 과장', role: '영업' },
-  gu:   { face: '🔧', name: '구 공장장', role: '생산' },
-  han:  { face: '🧮', name: '한 대리', role: '경리' },
-  oh:   { face: '🔍', name: '오 과장', role: '품질' },
-  lin:  { face: '☕', name: '린 매니저', role: '현지' },
+  seo:  { face: '📋', img: 'cast_seo',  name: '서 대리',   role: '구매' },
+  jung: { face: '📞', img: 'cast_jung', name: '정 과장',   role: '영업' },
+  gu:   { face: '🔧', img: 'cast_gu',   name: '구 공장장', role: '생산' },
+  han:  { face: '🧮', img: 'cast_han',  name: '한 대리',   role: '경리' },
+  oh:   { face: '🔍', img: 'cast_oh',   name: '오 과장',   role: '품질' },
+  lin:  { face: '☕', img: 'cast_lin',  name: '린 매니저', role: '현지' },
 };
+
+/* 말풍선 얼굴. 초상 이미지가 있으면 그걸 쓰고, 없으면 이모지로 돌아간다. */
+function face(p) {
+  const m = typeof p === 'string' ? CAST[p] : p;
+  if (!m) return '';
+  return m.img ? `<img class="facepic" src="art/${m.img}.jpg" alt="">` : m.face;
+}
 
 /* 출발 조건은 모두 같다. 국가·설비·자본금이 다르면 성적 차이가 판단의 차이인지
    출발점의 차이인지 가릴 수 없다. 교육용이니 판단만 남긴다. */
@@ -121,7 +128,7 @@ function openDecisions() {
   const ask = () => {
     dlg.innerHTML = `<div class="dlg">${head}
       <h2 style="font-size:19px;margin:10px 0 12px">${card.title}</h2>
-      <div class="say"><div class="face">${who.face}</div><div class="bubble">
+      <div class="say"><div class="face">${face(who)}</div><div class="bubble">
         <span class="who">${who.name} · ${who.role}</span>${card.text}</div></div>
       <div class="optlist">${card.opts.map((o, i) => `
         <button data-o="${i}"><b>${o.label}</b>${o.hint ? `<span>${o.hint}</span>` : ''}</button>`).join('')}</div>
@@ -240,82 +247,116 @@ function buildDecision(s, ui) {
 /* ============================================================
    공장 그림
    ============================================================ */
-function coil(x, y, r, cls) {
-  return `<circle cx="${x}" cy="${y}" r="${r}" class="${cls}"/>` +
-         `<circle cx="${x}" cy="${y}" r="${r * .34}" fill="#fffdf8" opacity=".9"/>`;
+/* ============================================================
+   공장 전경 — 레이어 이미지 합성
+   각 스프라이트는 컨테이너 대비 %로 배치한다. 기준점은 밑변 가운데,
+   즉 "물건이 바닥에 닿는 지점"이다. 그래야 크기를 바꿔도 안 뜬다.
+   ============================================================ */
+const ART = 'art/';
+
+function pl(file, x, y, w, z, title) {
+  return `<img class="pl" src="${ART}${file}" alt="" draggable="false"`
+       + (title ? ` title="${title}"` : '')
+       + ` style="left:${x}%;top:${y}%;width:${w}%;z-index:${z}">`;
+}
+function plTag(x, y, text, cls) {
+  return `<span class="pltag ${cls || ''}" style="left:${x}%;top:${y}%">${text}</span>`;
 }
 
-function factorySVG(s, L) {
-  const c = L.c;
+/* 라인 종류별 설치 자리. 0·1번은 본동, 2번은 증축동에 들어간다. */
+const SLOT = [
+  { x: 50, y: 43.5, w: 17, z: 42 },
+  { x: 61, y: 49.0, w: 17, z: 44 },
+  { x: 26, y: 40.0, w: 15, z: 36 },
+];
+
+function plantView(s, L) {
+  const c   = L.c;
   const raw = s.invRaw.reduce((a, l) => a + l.qty, 0);
-  const fg = s.invFg.reduce((a, l) => a + l.qty, 0);
-  const over = (raw + fg) > CFG.WAREHOUSE_CAP_BASE;
-  const per = 2200;
+  const fg  = s.invFg.reduce((a, l) => a + l.qty, 0);
+  const cap = CFG.WAREHOUSE_CAP_BASE;
+  const over = (raw + fg) > cap;
 
-  let yard = '';
-  for (let i = 0; i < Math.min(28, Math.round(raw / per)); i++) {
-    const col = i % 7, row = (i / 7) | 0;
-    yard += coil(200 + col * 28, 218 - row * 26, 11, over ? 'coil bad' : 'coil');
-  }
-  let out = '';
-  for (let i = 0; i < Math.min(12, Math.round(fg / per)); i++) {
-    const col = i % 4, row = (i / 4) | 0;
-    out += coil(790 + col * 27, 160 - row * 25, 10, 'coil fgc');
-  }
+  const age = inventoryAging(s);
+  const oldTon = age[2].qty + age[3].qty;
 
+  let h = '';
+
+  /* 1. 배 — 미착 물량. 같은 도착월끼리 묶어서 최대 2척. */
   const ships = s.poOpen.reduce((acc, p) => {
     const k = acc.find(x => x.eta === p.etaTurn);
     if (k) k.qty += p.qty; else acc.push({ eta: p.etaTurn, qty: p.qty });
     return acc;
-  }, []).sort((a, b) => a.eta - b.eta).slice(0, 3);
-  let sea = ships.length
-    ? ships.map((sh, i) => `<g transform="translate(14,${68 + i * 62})">
-        <path d="M0 14 L56 14 L48 28 L8 28 Z" class="ship"/>
-        <rect x="17" y="1" width="22" height="13" rx="2" class="ship"/>
-        <text x="28" y="43" class="tiny mid">${sh.eta}월 ${fmt(sh.qty)}t</text></g>`).join('')
-    : `<text x="44" y="150" class="tiny mid dim">바다에 배가 없습니다</text>`;
+  }, []).sort((a, b) => a.eta - b.eta).slice(0, 2);
+  ships.forEach((sh, i) => {
+    h += pl('ship.png', 21 + i * 8, 85 - i * 12, 30 - i * 5, 10 + i,
+            `${dateLabel(sh.eta)} 도착 ${fmt(sh.qty)}톤`);
+    h += plTag(21 + i * 8, 86 - i * 12, `🚢 ${dateLabel(sh.eta)} ${fmt(sh.qty)}t`);
+  });
 
-  const lines = s.lines.map((l, i) => {
-    const u = l.type === 'SLIT' ? (L.now.SLIT || 0) / Math.max(1, c.SLIT)
-            : l.type === 'LEVEL' ? (L.now.LEVEL || 0) / Math.max(1, c.LEVEL)
-            : ((L.now.TRAP || 0) + (L.now.DIE || 0)) / Math.max(1, c.BLANK);
-    const util = Math.max(0, Math.min(1, u)), w = 190;
-    return `<g transform="translate(440,${78 + i * 58})">
-      <rect width="${w}" height="42" rx="8" class="line"/>
-      <rect x="8" y="25" width="${w - 16}" height="10" rx="5" class="utilbg"/>
-      <rect x="8" y="25" width="${(w - 16) * util}" height="10" rx="5" class="util ${util > .92 ? 'hot' : ''}"/>
-      <text x="12" y="19" class="lbl">${CFG.LINE[l.type].label}</text>
-      <text x="${w - 12}" y="19" class="lbl end">${Math.round(util * 100)}%</text></g>`;
-  }).join('');
+  /* 2. 공장동. 증축하면 뒤쪽에 한 동이 더 선다. */
+  if ((s.buildings || 1) >= 2) h += pl('bldg2.png', 27, 46, 33, 30);
+  h += pl('bldg1.png', 58, 55, 46, 40);
 
-  let slots = '';
-  for (let i = 0; i < CFG.MAX_LINES - s.lines.length; i++)
-    slots += `<g transform="translate(440,${78 + (s.lines.length + i) * 58})">
-      <rect width="190" height="42" rx="8" class="slot"/>
-      <text x="95" y="26" class="tiny mid dim">빈 자리</text></g>`;
+  /* 3. 설비. 그 달에 투입이 있으면 가동 컷, 없으면 정지 컷. */
+  s.lines.forEach((l, i) => {
+    const slot = SLOT[i] || SLOT[2];
+    const used = l.type === 'SLIT'  ? (L.now.SLIT  || 0)
+               : l.type === 'LEVEL' ? (L.now.LEVEL || 0)
+               : (L.now.TRAP || 0) + (L.now.DIE || 0);
+    const room = (l.type === 'SLIT' ? c.SLIT : l.type === 'LEVEL' ? c.LEVEL : c.BLANK) || CFG.LINE[l.type].cap;
+    const util = Math.max(0, Math.min(1, used / Math.max(1, room)));
+    const on   = used > 0;
+    const file = { SLIT: 'slit', LEVEL: 'level', BLANK: 'blank' }[l.type] + (on ? '_on' : '_off') + '.png';
+    h += pl(file, slot.x, slot.y, slot.w, slot.z,
+            `${CFG.LINE[l.type].label} · 가동률 ${Math.round(util * 100)}%`);
+    h += plTag(slot.x, slot.y + 1.5,
+               `${CFG.LINE[l.type].label} ${Math.round(util * 100)}%`,
+               on ? (util > .92 ? 'hot' : 'on') : 'off');
+  });
 
-  return `<svg viewBox="0 0 960 296" class="plant">
-    <rect width="90" height="296" class="sea"/>
-    <rect x="90" width="870" height="296" class="ground"/>
-    ${sea}
-    <rect x="112" y="46" width="298" height="204" rx="10" class="zone"/>
-    <text x="124" y="67" class="lbl">소재 야드</text>
-    <text x="398" y="67" class="lbl end ${over ? 'warn' : 'dim'}">${fmt(raw)}t</text>
-    ${yard}
-    ${over ? `<text x="261" y="240" class="tiny mid warn">야드가 넘쳤습니다 · 동선이 막힙니다</text>` : ''}
-    <rect x="426" y="46" width="220" height="204" rx="10" class="zone"/>
-    <text x="438" y="67" class="lbl">공장동</text>
-    ${lines}${slots}
-    <rect x="662" y="46" width="286" height="204" rx="10" class="zone"/>
-    <text x="674" y="67" class="lbl">제품 창고 · 출하</text>
-    <text x="936" y="67" class="lbl end dim">${fmt(fg)}t</text>
-    ${out}
-    <g transform="translate(700,198)">
-      <rect width="48" height="27" rx="3" class="truck"/>
-      <rect x="48" y="9" width="23" height="18" rx="3" class="truck"/>
-      <circle cx="14" cy="29" r="5" class="wheel"/><circle cx="58" cy="29" r="5" class="wheel"/></g>
-    <text x="804" y="238" class="tiny mid dim">출하</text>
-  </svg>`;
+  /* 설치 중인 라인은 빈 자리로 표시한다. */
+  (s.buildQueue || []).forEach((b, i) => {
+    const slot = SLOT[Math.min(2, s.lines.length + i)];
+    h += plTag(slot.x, slot.y, `${CFG.LINE[b.type].label} 설치 중`, 'wip');
+  });
+
+  /* 4. 천장 크레인 */
+  h += pl('crane.png', 58, 40, 24, 46);
+
+  /* 5. 소재 코일. 재고량이 곧 야드 풍경이다. */
+  const tier = raw <= 0 ? null
+             : raw < cap * 0.25 ? { f: 'coil_s.png',    w: 17 }
+             : raw < cap * 0.55 ? { f: 'coil_m.png',    w: 23 }
+             : raw < cap        ? { f: 'coil_l.png',    w: 30 }
+             :                    { f: 'coil_over.png', w: 35 };
+  if (tier) h += pl(tier.f, 30, 53, tier.w, 50, `소재 재고 ${fmt(raw)}톤`);
+  h += plTag(30, 54.5, `소재 ${fmt(raw)}t`, over ? 'bad' : '');
+  if (over) h += plTag(30, 59, '야드 초과 · 동선이 막혔습니다', 'bad');
+
+  /* 6. 장기재고. 방수포 덮인 코일은 이 게임의 경고등이다. */
+  if (oldTon > 0) {
+    h += pl('coil_tarp.png', 17, 48, 12, 48, `3개월 넘은 재고 ${fmt(oldTon)}톤`);
+    h += plTag(17, 49.5, `장기 ${fmt(oldTon)}t`, 'bad');
+  }
+
+  /* 7. 제품. 슬리팅 코일과 블랭킹 팔레트를 나눠 쌓는다. */
+  const fgSlit  = s.invFg.filter(l => l.proc !== 'TRAP' && l.proc !== 'DIE').reduce((a, l) => a + l.qty, 0);
+  const fgBlank = s.invFg.filter(l => l.proc === 'TRAP' || l.proc === 'DIE').reduce((a, l) => a + l.qty, 0);
+  if (fgSlit  > 0) h += pl('fg_slit.png',  70, 53, 14, 52, `가공품 ${fmt(fgSlit)}톤`);
+  if (fgBlank > 0) h += pl('fg_blank.png', 78, 49, 9, 54, `블랭크 ${fmt(fgBlank)}톤`);
+  if (fg > 0) h += plTag(72, 54.5, `제품 ${fmt(fg)}t`);
+
+  /* 8. 스크랩·지게차·트럭 — 살아 있는 공장의 기척 */
+  h += pl('scrap.png', 60, 59, 7, 51);
+  if (raw > 0) h += pl('forklift.png', 43, 63, 11, 56);
+  h += pl('truck.png', 72, 84, 21, 60);
+  h += plTag(72, 85.5, '출하');
+
+  return `<div class="plantwrap">
+    <img class="plbase" src="${ART}base.jpg" alt="코일센터 전경">
+    ${h}
+  </div>`;
 }
 
 /* ---------- 렌더 ---------- */
@@ -334,7 +375,7 @@ function renderSetup() {
     <p class="sub">2026년 1월, 해외 코일센터 사장으로 부임합니다. 4년 동안 호황 · 공급과잉 · 불황 · 회복이
       한 번씩 오는데, 순서와 길이는 판마다 다릅니다.</p>
     <div class="card">
-      <div class="say"><div class="face">${CAST.han.face}</div><div class="bubble">
+      <div class="say"><div class="face">${face('han')}</div><div class="bubble">
         <span class="who">${CAST.han.name} · ${CAST.han.role}</span>
         사장님, 법인은 이미 세워져 있습니다. 모두 같은 조건에서 출발합니다. 이름만 정해주시면 됩니다.</div></div>
       <table>
@@ -408,7 +449,7 @@ function renderPlay() {
 
     ${metricsPanel(s)}
 
-    <div class="card" style="padding:10px 10px 4px">${factorySVG(s, L)}</div>
+    <div class="card" style="padding:10px 10px 4px">${plantView(s, L)}</div>
 
     ${custPanel(s)}
 
@@ -456,7 +497,7 @@ function renderPlay() {
 
     <div class="card">
       <h2>${G.mpt > 1 ? '이번 분기 지시' : '이번 달 지시'}</h2>
-      <div class="say"><div class="face">${CAST.seo.face}</div><div class="bubble">
+      <div class="say"><div class="face">${face('seo')}</div><div class="bubble">
         <span class="who">${CAST.seo.name} · ${CAST.seo.role}</span>
         넉 달 뒤에 쓸 소재를 지금 시킵니다. 얼마나 여유를 두시겠습니까.${
           G.mpt > 1 ? ' 이 방침대로 석 달을 갑니다.' : ''}</div></div>
@@ -506,7 +547,7 @@ function trimCard() {
   const base = CFG.YIELD.SLIT;
   return `<div class="card">
     <h2>이번 달 슬리팅 배분</h2>
-    <div class="say"><div class="face">${CAST.gu.face}</div><div class="bubble">
+    <div class="say"><div class="face">${face('gu')}</div><div class="bubble">
       <span class="who">${CAST.gu.name} · ${CAST.gu.role}</span>
       원코일 폭 ${COIL_WIDTH}mm입니다. 이번 달 고객이 달라는 폭은
       ${t.widths.map(w => w + 'mm').join(' / ')} 이렇게 셋입니다.
@@ -616,7 +657,7 @@ function hqOfferCard(L, ui) {
   const pct = L.quota > 0 ? (ui.hqTake / L.quota * 100).toFixed(0) : 0;
   return `<div class="card" style="border-color:#e0c9a8;background:#fffaf0">
     <h2>본사에서 연락이 왔습니다</h2>
-    <div class="say"><div class="face">${CAST.jung.face}</div><div class="bubble">
+    <div class="say"><div class="face">${face('jung')}</div><div class="bubble">
       <span class="who">${CAST.jung.name} · ${CAST.jung.role}</span>
       본사 공장이 물량을 못 채웠답니다. 유통향 일반재를 시세보다 <b>${(CFG.HQ_SPOT.discount * 100).toFixed(0)}% 싸게</b>
       넘기겠다고요. 싼 건 맞는데, 이건 고객이 정해진 물건이 아닙니다. 우리가 알아서 팔아야 합니다.</div></div>
@@ -635,7 +676,7 @@ function expandCard(type, L, s, ui) {
     : `본사가 주고 싶어 하는 물량이 우리 한계를 <b>월 ${fmt(type === 'SLIT' ? L.gapSlit : L.gapLevel)}톤</b> 넘습니다.`;
   return `<div class="card" style="border-color:#c9d8cd;background:#f7fbf8">
     <h2>${CFG.LINE[type].label}를 한 대 더 놓겠습니까</h2>
-    <div class="say"><div class="face">${CAST.gu.face}</div><div class="bubble">
+    <div class="say"><div class="face">${face('gu')}</div><div class="bubble">
       <span class="who">${CAST.gu.name} · ${CAST.gu.role}</span>
       ${extra} ${newBuild ? '그런데 자리가 없습니다. 공장동을 한 동 더 지어야 합니다.' : '자리는 있습니다.'}</div></div>
     <table><tr><td>설비</td><td>${money(capex)}</td></tr>

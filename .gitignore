@@ -10,3 +10,8 @@ test.js
 test-combined.html
 ui-old.js
 코일센터.html
+
+# 이미지 원본 (1254px, 46MB) — 배포본은 art/ 만 쓴다
+art-src/
+coil-center-beta.zip
+.claude/
