@@ -66,10 +66,15 @@ function newGame(opt) {
         pending: [], seen: {}, cards: {}, picks: {},
         turnDiscount: 0, yieldPenalty: 0, extraFixed: 0 };
 
+  /* 숨은 세계 — 설비·품질·고객 관계·본사 목표. 플레이어는 징후로만 본다. */
+  G.W = initWorld(s, D);
+  applyLegacy(s);
+  G.W.snaps.push(snapshot(s, G.W, null));
+
   /* 대형 사건은 판마다 다른 달에, 다른 조합으로 온다.
-     다섯 건을 뽑아 서로 다섯 달 이상 떨어뜨려 배치한다. */
+     지금은 대부분의 사건이 플레이어의 선택에서 나오므로, 외부 충격은 세 건만 둔다. */
   G.bigPlan = {};
-  const bigs = DECK.big.slice().sort(() => Math.random() - 0.5).slice(0, 5);
+  const bigs = DECK.big.slice().sort(() => Math.random() - 0.5).slice(0, 3);
   const used = [];
   for (const b of bigs) {
     for (let tries = 0; tries < 300; tries++) {
@@ -83,73 +88,51 @@ function newGame(opt) {
   render();
 }
 
-/* 이번 달에 누가 들어올지 짠다.
-   원칙 셋 — 같은 주제로 두 번 묻지 않는다.
-             최근에 나온 카드는 뒤로 미룬다.
-             운영 결정(증설·본사 지시·슬리팅)은 있을 때만, 한 달에 하나만. */
+/* 이번 달 안건을 짠다.
+   고정 덱에서 뽑지 않는다. 회사 상태와 지난 결정이 안건을 올리고(issues.js),
+   그중 급한 것부터 서너 건만 사장 책상에 올라온다. 같은 주제는 한 번만. */
 function dealTurn() {
   G.trim = trimOptions(Math.random);
   G.trimPick = 0;
   G.cards = {}; G.picks = {};
   G.queue = []; G.qi = 0; G.mult = 1; G.done = [];
 
-  const s = G.s, ctx = cardCtx(s), used = new Set();
-  const put = (deck, card) => {
+  const s = G.s, W = G.W, used = new Set();
+  G.before = { rel: { ...W.rel }, equip: W.equip };
+  G.ui.cover = { tight: 0.6, normal: 1.0, ample: 1.6 }[W.policy] ?? 1;
+
+  const put = (card) => {
     if (!card) return false;
-    const t = card.topic || deck;
+    const t = card.topic || 'etc';
     if (used.has(t)) return false;
     used.add(t);
     if (card.id) G.seen[card.id] = s.turn;
-    G.queue.push({ deck, card });
+    if (card.id === 'cust') G.lastCust = s.turn;
+    G.queue.push({ deck: t, card });
     return true;
   };
 
-  // 오래 안 나온 것부터 고른다. 같은 카드가 다음 달에 또 나오지 않게.
-  const draw = (deck) => {
-    const pool = DECK[deck].filter(c =>
-      !used.has(c.topic || deck) && (!c.when || c.when(s, ctx)));
-    if (!pool.length) return null;
-    pool.sort((a, b) => (G.seen[a.id] ?? -99) - (G.seen[b.id] ?? -99));
-    const oldHalf = Math.max(1, Math.ceil(pool.length / 2));
-    return pool[Math.floor(Math.random() * oldHalf)];
-  };
-
-  // 1. 큰 사건이 있으면 그것부터 — 그 달의 주인공이다
+  // 1. 외부 충격 — 정해진 달에 온다
   const big = G.bigPlan && G.bigPlan[s.turn];
-  if (big) put('big', big);
+  if (big) put({ ...big, topic: 'big' });
 
-  // 2. 소재 발주는 매달. 이 게임의 심장이라 빠질 수 없다.
-  put('buy', draw('buy'));
-
-  // 3. 운영 결정 — 있을 때만, 하나만
-  const L = look(s);
-  const ops = [];
-  if (L.isBust && L.quota > 0) ops.push(hqCard(L, s));
-  const ex = s.lines.length < CFG.MAX_LINES
-    ? (L.gapSlit > 800 ? 'SLIT' : L.gapLevel > 500 ? 'LEVEL'
-      : (s.turn > 10 && !s.lines.some(l => l.type === 'BLANK') ? 'BLANK' : null)) : null;
-  if (ex && !(s.buildQueue || []).length && (s.turn - (G.seen['op-expand'] ?? -99)) > 6)
-    ops.push(expandCard(ex, L, s));
-  if (G.trim && s.lines.some(l => l.type === 'SLIT') && (s.turn - (G.seen['op-trim'] ?? -99)) > 5)
-    ops.push(trimCard());
-  if (ops.length) put('op', ops[Math.floor(Math.random() * ops.length)]);
-
-  // 4. 사람 이야기 — 영업·생산·고객에서 두 장. 매달 조합이 바뀐다.
-  const custGap = G.mpt > 1 ? 1 : 3;
-  const bag = [];
-  if ((s.turn - (G.lastCust ?? -99)) >= custGap)
-    bag.push(() => { const ok = put('cust', customerCard(s)); if (ok) G.lastCust = s.turn; return ok; });
-  bag.push(() => put('sales', draw('sales')));
-  bag.push(() => put('prod', draw('prod')));
-  // 사내 이야기는 가끔. 매달 나오면 그것도 금방 식상해진다.
-  if (Math.random() < 0.34) bag.push(() => put('life', draw('life')));
-  for (let i = bag.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [bag[i], bag[j]] = [bag[j], bag[i]];
+  // 2. 회사가 만든 안건 — 반드시 올라올 것부터, 그다음 급한 순서
+  const cand = worldIssues(s, W, G).sort((a, b) => (b.force - a.force) || (b.prio - a.prio));
+  for (const c of cand) {
+    if (G.queue.length >= 4) break;
+    if (!c.force && G.queue.length >= 3 && c.prio < 70) break;
+    put(c.card);
   }
-  let got = 0;
-  for (const f of bag) { if (got >= 2) break; if (f()) got++; }
-  if (!got) put('prod', draw('prod'));
+
+  // 3. 사내 이야기 — 가끔. 숫자로 안 잡히는 일도 회사다.
+  if (G.queue.length < 4 && wChance(0.28)) {
+    const pool = DECK.life.filter(c => (!c.when || c.when(s, cardCtx(s))) && (s.turn - (G.seen[c.id] ?? -99)) > 12);
+    if (pool.length) put(wPick(pool));
+  }
+
+  // 4. 너무 조용하면 기회를 하나 올린다
+  if (G.queue.length < 2) put(custFocusCard(s, W));
+  if (!G.queue.length) put(policyCard(s, W, coverOf(s)));
 }
 
 /* ---------- 결재 팝업: 카드 한 장씩, 고르면 바로 결과 ---------- */
@@ -262,7 +245,7 @@ function cardCtx(s) {
   return { load, tight: load > 0.97, idle: load < 0.55, pmTrend };
 }
 
-const DECK_LABEL = { buy: '구매', cust: '영업 · 고객 개척', sales: '영업', prod: '생산', op: '운영', life: '사내', big: '주요 사건' };
+const DECK_LABEL = { buy: '구매', policy: '구매 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', op: '운영', life: '사내', big: '주요 사건' };
 
 /* 매달 영업 인력을 어느 고객군에 붙일지. 결실은 석 달 뒤. */
 function customerCard(s) {
@@ -320,7 +303,8 @@ function buildDecision(s, ui) {
     buy: { totalTon: buy, alpha: 1, beta: 1, hqSpotTon: ui.hqTake },
     invest: { addLine: ui.expandPick, newBuilding: s.lines.length >= CFG.MAX_LINES,
               yieldProgram: ui.yieldSpend, salesEffort: ui.salesSpend },
-    options: { overtime: ui.overtime, discount: G ? G.turnDiscount : 0,
+    options: { overtime: ui.overtime, // 깎아준 단가는 그 고객 비중만큼 매달 판가에 남는다
+               discount: G ? (G.turnDiscount || 0) + (G.W ? standingCut(s, G.W) : 0) : 0,
                trimYield: G && G.trim ? G.trim.options[G.trimPick].yield : 0,
                custFocus: ui.custFocus || null },
     run: { SLIT: runS, LEVEL: runL, TRAP: runT, DIE: runD },
@@ -380,7 +364,7 @@ function lineList(s, L) {
     const file = { SLIT: 'slit', LEVEL: 'level', BLANK: 'blank' }[l.type] + (on ? '_on' : '_off') + '.png';
     return `<div class="lrow ${on ? '' : 'idle'}">
       <div class="ltop"><b>${CFG.LINE[l.type].label}</b>
-        <i class="${on ? (util > .92 ? 'hot' : 'on') : 'off'}">${on ? `가동 ${pct}%` : '정지'}</i></div>
+        <i class="${on ? (util > .92 ? 'hot' : 'on') : 'off'}">${on ? `주문 부하 ${pct}%` : '주문 없음'}</i></div>
       <img src="${A(file)}" alt="">
       <div class="lbot">
         <span class="track"><span class="fill ${util > .92 ? 'over' : ''}" style="width:${pct}%"></span></span>
@@ -524,6 +508,101 @@ function renderSetup() {
 }
 
 /* ============================================================
+   경영 대시보드 — 이번 달 숫자, 왜 그렇게 됐는지, 앞으로 뭐가 올지
+   ============================================================ */
+
+/* 경영현황 — 지난달 대비 화살표. 숨은 값은 말로만 보여준다. */
+function dashPanel(s, W) {
+  const a = W.snaps[W.snaps.length - 1], b = W.snaps[W.snaps.length - 2];
+  if (!a || !b) return '';
+  const tile = (k, v, d, inv, fmtD) => {
+    const dir = d == null || Math.abs(d) < 1e-6 ? '' : d > 0 ? '▲' : '▼';
+    const good = d == null ? '' : (d > 0) !== !!inv ? 'up' : 'dn';
+    return `<div class="dtile"><i>${k}</i><b>${v}</b>${dir ? `<span class="${good}">${dir} ${fmtD(Math.abs(d))}</span>` : '<span class="neu">–</span>'}</div>`;
+  };
+  const relNow = a.rel, relPrev = b.rel;
+  const pace = a.hqPace;
+  return `<div class="card">
+    <h2>${a.turn > 0 ? dateLabel(Math.max(1, s.turn - 1)) : ''} 경영현황</h2>
+    <div class="dash">
+      ${tile('판매량', `${fmt(a.sales)}t`, a.sales - b.sales, false, v => fmt(v) + 't')}
+      ${tile('영업이익', `${(a.op < 0 ? '−$' : '$') + fmt(Math.abs(a.op) / 1000)}k`, a.op - b.op, false, v => '$' + fmt(v / 1000) + 'k')}
+      ${tile('현금', M(a.cash), a.cash - b.cash, false, v => '$' + (v / 1e6).toFixed(1) + 'M')}
+      ${tile('소재 재고', `${fmt(a.raw)}t`, a.raw - b.raw, true, v => fmt(v) + 't')}
+      ${tile('가동률', `${Math.round(a.util * 100)}%`, (a.util - b.util) * 100, false, v => v.toFixed(0) + '%p')}
+      ${tile('양품률', `${a.quality.toFixed(1)}%`, a.quality - b.quality, false, v => v.toFixed(1) + '%p')}
+      ${tile('설비', equipLabel(a.equip), a.equip - b.equip, false, () => '')}
+      ${tile('고객 관계', relLabel(relNow), relNow - relPrev, false, () => '')}
+      ${tile('본사 신뢰', Math.round(a.trust), a.trust - b.trust, false, v => v.toFixed(0))}
+      ${tile('직원 사기', Math.round(a.morale), a.morale - b.morale, false, v => v.toFixed(0))}
+      ${pace != null ? tile('본사 목표 페이스', `${Math.round(pace * 100)}%`, null, false, () => '') : ''}
+      ${tile('현장', fatigueLabel(W.fatigue), null, false, () => '')}
+    </div></div>`;
+}
+
+/* 지난달 결정의 영향 — 선택과 결과를 한 줄로 잇는다 */
+function impactPanel(W) {
+  if (!W.lastImpacts.length) return '';
+  return `<div class="card">
+    <h2>지난 결재의 영향</h2>
+    <div class="imps">${W.lastImpacts.map(im => `<div class="imp"><b>${im.label}</b>
+      <div class="fx">${im.rows.map(([k, t]) => {
+        const cls = k === '+' ? 'up' : k === '−' ? 'dn' : k === '?' ? 'rsk' : 'neu';
+        return `<span class="${cls}">${k === '?' ? '⚠ ' : ''}${t}</span>`; }).join('')}</div></div>`).join('')}</div>
+    <p class="hint">판매량·이익 변화는 그 결정이 움직인 몫을 따로 떼어 추정한 값입니다.</p>
+  </div>`;
+}
+
+/* 이번 달 여파 — 과거의 결정이 지금 돌아온 것 */
+function firedPanel(W) {
+  if (!W.lastFired.length) return '';
+  return `<div class="card fired">
+    <h2>돌아온 청구서</h2>
+    ${W.lastFired.map(f => `<div class="fire">
+      <b>${f.text}</b>${f.why ? `<span>원인 · ${f.why}</span>` : ''}</div>`).join('')}
+  </div>`;
+}
+
+/* 조기 경보 */
+function warnPanel(s, W) {
+  const w = warnings(s, W);
+  if (!w.length) return '';
+  return `<div class="card warns">
+    <h2>경고</h2>
+    ${w.map(([k, t]) => `<div class="warn"><i>⚠ ${k}</i><span>${t}</span></div>`).join('')}
+  </div>`;
+}
+
+/* 부서 보고 — 정보에는 확인·추정·소문이 섞여 있다 */
+function briefPanel(s, W) {
+  const b = briefing(s, W);
+  return `<div class="card">
+    <h2>부서 보고</h2>
+    <div class="briefs">${b.map(x => {
+      const who = CAST[x.who];
+      return `<div class="brief">
+        <div class="bface">${face(x.who)}</div>
+        <div class="btext"><span class="bwho">${who.name} · ${who.role}
+          <em class="k-${x.kind === '확인' ? 'ok' : x.kind === '추정' ? 'est' : 'rum'}">${x.kind}</em></span>
+          ${x.text}</div></div>`; }).join('')}</div>
+    <p class="hint">소문은 틀릴 수 있습니다. 누가 말했는지, 확인된 건지를 보고 판단하십시오.</p>
+  </div>`;
+}
+
+/* 연차 배너 */
+function yearBanner(s) {
+  const y = Math.min(3, Math.floor((s.turn - 1) / 12));
+  const t = YEAR_THEME[y];
+  return `<div class="card yearban">
+    <b>${y + 1}년차 · ${t.name}</b>
+    <span>${t.text}</span>
+    <span class="chap">${chapterOf(s, s.turn).label} — ${chapterOf(s, s.turn).brief}</span>
+    ${(s.buildQueue || []).length ? `<div class="note">${(s.buildQueue || []).map(b =>
+      `${CFG.LINE[b.type].label} 설치 중 — ${dateLabel(b.readyTurn)}부터 가동`).join(' · ')}</div>` : ''}
+  </div>`;
+}
+
+/* ============================================================
    공장 화면 — 브리핑만 한다. 여기서는 아무것도 결정하지 않는다.
    상황을 보고, 준비가 되면 직원들을 부른다.
    ============================================================ */
@@ -552,20 +631,23 @@ function renderPlay() {
       <div class="stat"><div class="k">직원 사기</div><div class="v">${Math.round(s.morale)}</div></div>
     </div>
 
-    <div class="card" style="background:var(--ochre-l)">
-      <b style="font-size:19px">${chapterOf(s, s.turn).label}</b>
-      <span class="muted" style="font-size:15px"> · ${chapterOf(s, s.turn).brief}</span>
-      ${(s.buildQueue || []).length ? `<div class="note">${(s.buildQueue || []).map(b =>
-        `${CFG.LINE[b.type].label} 설치 중 — ${dateLabel(b.readyTurn)}부터 가동`).join(' · ')}</div>` : ''}
+    ${yearBanner(s)}
+
+    ${firedPanel(G.W)}
+
+    ${dashPanel(s, G.W)}
+
+    <div class="grid g2">${impactPanel(G.W) || ''}${warnPanel(s, G.W) || ''}</div>
+
+    ${briefPanel(s, G.W)}
+
+    <div class="center" style="margin:6px 0 26px">
+      <button class="primary" id="go">결재 시작</button>
+      <p class="hint" style="margin-top:10px">${periodNow()} 안건이 올라와 있습니다.
+        보고를 읽고, 무엇이 급한지 판단하십시오.</p>
     </div>
 
     ${plantView(s, L)}
-
-    <div class="center" style="margin:6px 0 26px">
-      <button class="primary" id="go">직원들 들어오라고 하기</button>
-      <p class="hint" style="margin-top:10px">${periodNow()} 결재를 시작합니다.
-        직원들이 한 명씩 들어와 상황을 보고하고, 사장님이 정하면 그대로 집행됩니다.</p>
-    </div>
 
     ${metricsPanel(s)}
 
@@ -777,10 +859,12 @@ function custPanel(s) {
     <h2>우리 고객 구성</h2>
     ${Object.entries(CFG.CUSTOMERS).map(([k, c]) => {
       const pend = (s.custQueue || []).filter(q => q.key === k);
-      return `<div class="custbar"><span>${c.emoji} ${c.name}</span>
+      const r = G && G.W ? G.W.rel[k] : 60, cut = G && G.W ? G.W.cut[k] : 0;
+      return `<div class="custbar"><span>${CUST[k]} · ${c.name}</span>
         <span class="track"><span class="fill" style="width:${(sh[k] || 0) * 100}%"></span></span>
         <span>${((sh[k] || 0) * 100).toFixed(0)}%${pend.length
-          ? `<span class="pend">▲${dateLabel(pend[0].turn).replace(/^\d+년 /, '')}</span>` : ''}</span></div>`;
+          ? `<span class="pend">▲${dateLabel(pend[0].turn).replace(/^\d+년 /, '')}</span>` : ''}</span>
+        <span class="rel ${relCls(r)}">${relLabel(r)}${cut > 0 ? ` · −$${cut}/t` : ''}</span></div>`;
     }).join('')}
     <p class="hint">이 구성이 판가 톤당 ${pf.margin >= 0 ? '+' : '−'}$${Math.abs(pf.margin).toFixed(1)},
       물량 흔들림 ±${(pf.vol * 100).toFixed(0)}%, 대금 회수 ${pf.dso.toFixed(1)}개월,
@@ -848,6 +932,7 @@ function mergeReports(list) {
 function advance() {
   const months = G.mpt || 1;
   const reports = [];
+  G.W.fired = [];
 
   for (let i = 0; i < months; i++) {
     const s = G.s, fired = [];
@@ -867,7 +952,9 @@ function advance() {
     /* 증설·본사 지시·고객 영업은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
        발주와 가동은 석 달 내내 그 방침대로 돈다. */
     const ui = i === 0 ? G.ui : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null };
+    worldPre(s, G.W);                       // 설비·품질이 이번 달 캐파와 수율을 정한다
     const res = resolveTurn(s, buildDecision(s, ui));
+    worldPost(res.state, G.W, res.report, G); // 결과가 설비·관계·피로를 움직이고, 다음 사건을 부른다
 
     CFG.FC_BASE = savedFC;
     for (const k in savedY) CFG.YIELD[k] = savedY[k];
@@ -878,6 +965,11 @@ function advance() {
     reports.push(res.report);
     if (G.s.over) break;
   }
+
+  // 지난 결재가 실제로 무엇을 움직였는지 정리하고, 이번 달 대시보드 스냅샷을 남긴다
+  settleImpacts(G.s, G.W, mergeReports(reports), G.before || { rel: { ...G.W.rel }, equip: G.W.equip });
+  G.W.snaps.push(snapshot(G.s, G.W, mergeReports(reports)));
+  G.W.lastFired = G.W.fired;
 
   G.resultLines = [];
   G.turnDiscount = 0;
@@ -911,6 +1003,8 @@ function showReport(R) {
       <tr class="tot"><td>본사 이익 (우리 + 본사)</td>
         <td class="${R.consolidated < 0 ? 'v neg' : 'v pos'}">${money(R.consolidated)}</td></tr></table>
     ${R.lineReady ? `<div class="note good">${R.lineReady}</div>` : ''}
+    ${G.W && G.W.fired.length ? `<div class="sep"></div><h2>돌아온 청구서</h2>${G.W.fired.map(f =>
+      `<div class="note bad"><b>${f.text}</b>${f.why ? `<br><span class="muted">원인 · ${f.why}</span>` : ''}</div>`).join('')}` : ''}
     ${lines.length ? `<div class="sep"></div>${lines.map(t =>
       `<div class="note ${/결품|넘겼|막혀|모자|대손|떠나|부도|클레임|넘어갔|나갔/.test(t) ? 'bad' : ''}">${t}</div>`).join('')}` : ''}
     <div class="ok"><button class="primary" id="close">확인</button></div></div>`;
@@ -924,28 +1018,73 @@ function showReport(R) {
 }
 
 function renderEnd() {
-  const g = grade(G.s, (G.diff || DIFF.normal).target), s = G.s, hist = s.history;
-  const best = hist.reduce((a, h) => h.op > a.op ? h : a, hist[0] || { op: 0, turn: 0 });
-  const worst = hist.reduce((a, h) => h.op < a.op ? h : a, hist[0] || { op: 0, turn: 0 });
+  const g = grade(G.s, (G.diff || DIFF.normal).target), s = G.s, W = G.W;
+  const P = companyProfile(s, W), m = P.m;
+  const k = v => (v < 0 ? '−$' : '$') + fmt(Math.abs(v) / 1000) + 'k';
+  const styleBars = Object.keys(STYLE_NAME).map(key => {
+    const tot = Object.values(W.style).reduce((a, b) => a + b, 0) || 1;
+    const p = (W.style[key] || 0) / tot;
+    return `<div class="custbar"><span>${STYLE_NAME[key]}</span>
+      <span class="track"><span class="fill ${key === P.main ? 'over' : ''}" style="width:${p * 100}%"></span></span>
+      <span>${Math.round(p * 100)}%</span></div>`;
+  }).join('');
+  const custRows = Object.keys(CUST).map(c => `<div class="custbar"><span>${CUST[c]} · ${CFG.CUSTOMERS[c].name}</span>
+      <span class="track"><span class="fill" style="width:${(s.custShare[c] || 0) * 100}%"></span></span>
+      <span>${Math.round((s.custShare[c] || 0) * 100)}%</span>
+      <span class="rel ${relCls(W.rel[c])}">${relLabel(W.rel[c])}</span></div>`).join('');
+  const hqRows = W.hq.log.map(y => `<tr><td>${y.year}년차 본사 목표</td>
+      <td class="${y.r >= 1 ? 'v pos' : y.r < 0.9 ? 'v neg' : ''}">${Math.round(y.r * 100)}%</td></tr>`).join('');
+
   app.innerHTML = `
-    <div class="card center" style="padding:34px 24px">
-      <p class="muted">${s.companyName} · ${COUNTRIES[s.country] ? COUNTRIES[s.country].name : ''} · ${hist.length}개월</p>
-      <div class="big">${g.grade}</div>
-      <h1 style="margin:6px 0 14px">${g.title}</h1>
-      <p class="sub" style="max-width:520px;margin:0 auto 22px">${g.desc}</p>
-      <table style="max-width:460px;margin:0 auto;text-align:left">
-        <tr><td>본사 주문을 얼마나 채웠나</td><td>${(g.fulfil * 100).toFixed(0)}%</td></tr>
-        <tr><td>우리 회사 누적 영업이익</td>
-          <td class="${g.soloOp < 0 ? 'v neg' : 'v pos'}">${M(g.soloOp)}</td></tr>
-        <tr class="tot"><td>본사 이익 (우리 + 본사)</td>
-          <td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${M(g.consol)}</td></tr></table>
-      <div class="sep" style="max-width:460px;margin:18px auto"></div>
-      <table style="max-width:460px;margin:0 auto;text-align:left">
-        <tr><td>제일 좋았던 달</td><td>${best.turn}월 · ${money(best.op)}</td></tr>
-        <tr><td>제일 나빴던 달</td><td>${worst.turn}월 · ${money(worst.op)}</td></tr>
-        <tr><td>본사에서 사온 소재</td><td>${fmt(s.hq.cumMaterialTons)} 톤</td></tr></table>
-      <div style="margin-top:26px"><button class="primary" id="again">다시 하기</button></div>
-    </div>`;
+    <div class="card center" style="padding:30px 22px 24px">
+      <p class="muted">${s.companyName} · ${s.history.length}개월 · ${(G.diff || DIFF.normal).name}</p>
+      <h1 style="margin:4px 0 2px">당신이 만든 회사</h1>
+      <div class="big" style="color:var(--blue)">${P.name}</div>
+      <div class="profile">${P.lines.map(t => `<p>${t}</p>`).join('')}</div>
+      <p class="muted" style="font-size:13px;margin-top:14px">본사 평가 ${g.grade} · ${g.title} — ${g.desc}</p>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <h2>4년의 숫자</h2>
+        <table>
+          <tr><td>누적 판매량</td><td>${fmt(m.tons)}t</td></tr>
+          <tr><td>누적 영업이익</td><td class="${m.op < 0 ? 'v neg' : 'v pos'}">${k(m.op)}</td></tr>
+          <tr><td>톤당 평균 영업이익</td><td>$${m.margin.toFixed(1)}/t</td></tr>
+          <tr><td>본사 소재 판매량</td><td>${fmt(m.hqTons)}t</td></tr>
+          <tr><td>본사 이익 (우리 + 본사)</td><td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${k(g.consol)}</td></tr>
+          <tr><td>본사 내시 수행률</td><td>${Math.round(g.fulfil * 100)}%</td></tr>
+          ${hqRows}
+          <tr><td>평균 가동률</td><td>${Math.round(m.util * 100)}%</td></tr>
+          <tr><td>평균 양품률</td><td>${m.quality.toFixed(1)}%</td></tr>
+          <tr><td>재고 회전 (미착 포함)</td><td>연 ${m.turnover.toFixed(1)}회</td></tr>
+          <tr><td>마지막 현금</td><td>${k(m.cash)}</td></tr>
+          <tr><td>본사 신뢰도</td><td>${Math.round(m.trust)}</td></tr>
+          <tr><td>직원 사기</td><td>${Math.round(m.morale)}</td></tr>
+          <tr class="tot"><td>핵심 고객 의존도</td><td>${CUST[m.topK]} ${Math.round(m.topShare * 100)}%</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h2>사고와 선택</h2>
+        <table>
+          <tr><td>설비 고장</td><td>${W.stats.breakdowns}번</td></tr>
+          <tr><td>정비를 미룬 횟수</td><td>${W.stats.deferrals}번</td></tr>
+          <tr><td>품질 클레임</td><td>${W.stats.claims}건</td></tr>
+          <tr><td>납기를 못 맞춘 달</td><td>${W.stats.shortages}번</td></tr>
+          <tr><td>가격을 양보한 횟수</td><td>${W.stats.concessions}번</td></tr>
+          <tr><td>경쟁사로 빠진 물량</td><td>${W.stats.churn}번</td></tr>
+          <tr><td>가동률 90% 넘은 달</td><td>${W.stats.overloadMonths}개월</td></tr>
+          <tr><td>현금이 빠듯했던 달</td><td>${W.stats.cashTight}개월</td></tr>
+        </table>
+        <div class="sep"></div>
+        <h2>경영 스타일</h2>
+        ${styleBars}
+        <div class="sep"></div>
+        <h2>고객 포트폴리오</h2>
+        ${custRows}
+      </div>
+    </div>
+    <div class="center" style="margin-top:18px"><button class="primary" id="again">다시 하기</button></div>`;
   $('#again').onclick = () => { G = null; render(); };
 }
 

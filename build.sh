@@ -7,6 +7,8 @@ cd "$(dirname "$0")"
   cat shell.html
   printf '<script>\n';  sed '/^if (typeof module/,$d' engine.js; printf '</script>\n'
   printf '<script>\n';  cat decks.js;                          printf '</script>\n'
+  printf '<script>\n';  cat world.js;                          printf '</script>\n'
+  printf '<script>\n';  cat issues.js;                         printf '</script>\n'
   [ -f assets.js ] && { printf '<script>\n'; cat assets.js;    printf '</script>\n'; }
   printf '<script>\n';  cat ui.js;                             printf '</script>\n'
 } > index.html

@@ -678,6 +678,8 @@ function resolveTurn(state, decision) {
     s.cash -= d.invest.yieldProgram;
     yieldBonus = Math.min(0.02, d.invest.yieldProgram / 100_000 * 0.004);
   }
+  // 품질·설비 상태가 수율을 밀고 당긴다 (world.js)
+  yieldBonus += (s.mods && s.mods.yieldAdj) || 0;
 
   /* STEP 4. 발주 입고 (입고와 지급은 분리 — 90일 시차가 이 게임의 긴장감) */
   {
@@ -748,7 +750,9 @@ function resolveTurn(state, decision) {
 
   /* STEP 6. 캐파 검증 */
   const cap = capacityOf(s);
-  const mult = (d.options.overtime ? CFG.OT_CAP_MULT : 1) * (1 - congestionPenalty);
+  // s.mods는 world.js가 매달 채운다 — 설비 상태·고장이 캐파를, 품질이 수율을 깎는다
+  const mods = s.mods || {};
+  const mult = (d.options.overtime ? CFG.OT_CAP_MULT : 1) * (1 - congestionPenalty) * (mods.capMult ?? 1);
   const used = { SLIT: d.run.SLIT, LEVEL: d.run.LEVEL, BLANK: d.run.TRAP + d.run.DIE };
   for (const k of ['SLIT', 'LEVEL', 'BLANK']) {
     const limit = cap[k] * mult;
@@ -1117,6 +1121,10 @@ function resolveTurn(state, decision) {
     hqSpotOffer, hqSpotTon,
     shipped, produced, demand, demandAuto, demandCommon, nasi: s.nasi.map(n => ({ turn: n.turn, tons: { ...n.tons }, potential: { ...(n.potential || n.tons) } })), nasiPotential: nasiNow.potential || nasiNow.tons, commonShareOfSales, hqSpotCredit: s.hqSpotCredit, cashIn, cashOut,
     spotExposure: spotExposure(s),
+    // 실제로 돌린 양 ÷ 명목 캐파. world.js가 설비 마모와 과부하를 이걸로 계산한다
+    util: (d.run.SLIT + d.run.LEVEL + d.run.TRAP + d.run.DIE) / Math.max(1, cap.SLIT + cap.LEVEL + cap.BLANK),
+    shortRatio,
+    materialTons,
     invTons: inventoryTons(s),
     log, flags,
   };
