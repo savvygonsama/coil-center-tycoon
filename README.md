@@ -4,7 +4,7 @@
 주재원과 본사 수출영업 담당자 교육용으로 만들고 있습니다.
 
 ## 플레이
-- **브라우저에서 바로:** GitHub Pages 링크
+- **브라우저에서 바로:** https://savvygonsama.github.io/coil-center-tycoon/
 - **내려받아서:** `coil-center-beta.zip`을 풀고 `index.html`을 더블클릭합니다.
   `index.html`과 `art/` 폴더가 **같은 자리에 함께 있어야** 공장 그림이 뜹니다.
   설치나 인터넷 연결은 필요 없습니다.
