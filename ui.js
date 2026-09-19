@@ -39,7 +39,11 @@ function newGame(opt) {
     equity: opt.equity, debtLimit: Math.round(opt.equity * 0.6),
     lines: opt.lines, country: opt.country, companyName: opt.name,
   });
-  G = { s, ui: { cover: 1, hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0 },
+  /* 노멀은 매달, 속성은 분기마다 결재한다. 속성은 카드 한 벌로 석 달을 한 번에 돌린다.
+     48개월 ÷ 3 = 16번이면 끝난다. */
+  const mpt = opt.mode === 'quick' ? 3 : 1;
+  G = { s, mode: opt.mode || 'normal', mpt,
+        ui: { cover: 1, hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0 },
         pending: [], seen: {}, cards: {}, picks: {},
         turnDiscount: 0, yieldPenalty: 0, extraFixed: 0 };
 
@@ -50,7 +54,9 @@ function newGame(opt) {
   const used = [];
   for (const b of bigs) {
     for (let tries = 0; tries < 300; tries++) {
-      const m = 6 + Math.floor(Math.random() * (CFG.TOTAL_TURNS - 8));
+      let m = 6 + Math.floor(Math.random() * (CFG.TOTAL_TURNS - 8));
+      // 속성 모드는 분기 첫 달에만 결재하므로, 사건도 그 달로 당겨 놓는다
+      if (mpt > 1) m = m - ((m - 1) % mpt);
       if (used.every(u => Math.abs(u - m) >= 5)) { used.push(m); G.bigPlan[m] = b; break; }
     }
   }
@@ -109,7 +115,7 @@ function openDecisions() {
   const dlg = document.createElement('dialog');
   dlg.className = 'deck';
   const head = `<div class="dlgtop">
-      <span class="tag">${dateLabel(G.s.turn)} · ${DECK_LABEL[deck]}</span>
+      <span class="tag">${periodNow()} · ${DECK_LABEL[deck]}</span>
       <span class="muted" style="font-size:12px">${G.qi + 1} / ${G.queue.length}</span></div>`;
 
   const ask = () => {
@@ -343,9 +349,26 @@ function renderSetup() {
       <label class="row"><div class="lab"><span>회사 이름</span></div>
         <input id="nm" placeholder="예: 한빛 코일센터"
           style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:var(--panel);color:var(--ink)"></label>
-      <div style="margin-top:18px"><button class="primary" id="go">부임하기</button></div>
+      <div class="sep"></div>
+      <h2>어느 쪽으로 하시겠습니까</h2>
+      <div class="modes">
+        <button id="go-normal" class="modecard">
+          <b>노멀</b>
+          <span class="n">48개월 · 결재 48번</span>
+          <span class="d">매달 결재합니다. 한 달 한 달이 보이고, 배가 언제 오는지 재고가 어떻게 쌓이는지
+            직접 겪습니다. 처음이면 이쪽을 권합니다.</span>
+        </button>
+        <button id="go-quick" class="modecard">
+          <b>속성</b>
+          <span class="n">16분기 · 결재 16번</span>
+          <span class="d">분기마다 한 번만 결재하고, 정한 방침대로 석 달이 한꺼번에 돌아갑니다.
+            빠르게 한 판 끝내보고 싶을 때. 대신 중간에 손을 못 댑니다.</span>
+        </button>
+      </div>
     </div>`;
-  $('#go').onclick = () => newGame({ ...SETUP, name: $('#nm').value.trim() || '노바리아 코일센터' });
+  const start = mode => newGame({ ...SETUP, mode, name: $('#nm').value.trim() || '노바리아 코일센터' });
+  $('#go-normal').onclick = () => start('normal');
+  $('#go-quick').onclick = () => start('quick');
 }
 
 function renderPlay() {
@@ -363,8 +386,8 @@ function renderPlay() {
   app.innerHTML = `
     <div class="hud">
       <div class="stat"><div class="k">${s.companyName}</div>
-        <div class="v" style="font-size:15px">${dateLabel(s.turn)}
-          <span class="muted" style="font-size:11px">${s.turn}/48</span></div></div>
+        <div class="v" style="font-size:15px">${periodNow()}
+          <span class="muted" style="font-size:11px">${periodIndex()}/${periodTotal()}</span></div></div>
       <div class="stat"><div class="k">시황</div><div class="v" style="font-size:15px">
         <span class="phase ph-${s.market.phase}">${ph.label}</span></div></div>
       <div class="stat"><div class="k">소재 시세</div><div class="v">$${fmt(s.market.pm)}</div></div>
@@ -432,10 +455,11 @@ function renderPlay() {
     ${expandable ? expandCard(expandable, L, s, ui) : ''}
 
     <div class="card">
-      <h2>이번 달 지시</h2>
+      <h2>${G.mpt > 1 ? '이번 분기 지시' : '이번 달 지시'}</h2>
       <div class="say"><div class="face">${CAST.seo.face}</div><div class="bubble">
         <span class="who">${CAST.seo.name} · ${CAST.seo.role}</span>
-        넉 달 뒤에 쓸 소재를 지금 시킵니다. 얼마나 여유를 두시겠습니까.</div></div>
+        넉 달 뒤에 쓸 소재를 지금 시킵니다. 얼마나 여유를 두시겠습니까.${
+          G.mpt > 1 ? ' 이 방침대로 석 달을 갑니다.' : ''}</div></div>
       <label class="row"><div class="lab"><span>소재 발주</span>
           <b>${fmt(d._buyTon)}톤 · ${money(d._buyTon * s.market.pm)}</b></div>
         <input type="range" id="cov" min="0" max="2" step="0.25" value="${ui.cover}">
@@ -448,7 +472,7 @@ function renderPlay() {
     </div>
 
     <div class="center" style="margin-top:20px">
-      <button class="primary" id="go">결재하고 한 달 보내기</button></div>`;
+      <button class="primary" id="go">결재하고 ${G.mpt > 1 ? '석 달' : '한 달'} 보내기</button></div>`;
 
   $('#cov').oninput = e => { G.ui.cover = +e.target.value; renderPlay(); };
   const hq = $('#hq'); if (hq) hq.oninput = e => { G.ui.hqTake = +e.target.value; renderPlay(); };
@@ -505,9 +529,14 @@ function trimCard() {
 
 /* ---------- 경영지표: 당월 / 누계 / 전월 대비 ---------- */
 function metricsPanel(s) {
-  const h = s.history, R = h[h.length - 1], P = h[h.length - 2];
+  const h = s.history;
+  // 속성 모드는 석 달을 한 칸으로 묶어 보여준다
+  const n = (G && G.mpt) || 1;
+  const seg = end => { const a = h.slice(Math.max(0, end - n), end); return a.length ? mergeReports(a) : null; };
+  const R = seg(h.length), P = seg(h.length - n);
+  const CUR = n > 1 ? '이번 분기' : '당월', PRV = n > 1 ? '전분기 대비' : '전월 대비';
   if (!R) return `<div class="card metrics"><h2>경영지표</h2>
-    <p class="hint">${dateLabel(s.turn)} 결산이 끝나면 여기에 실적이 쌓입니다.</p></div>`;
+    <p class="hint">${periodNow()} 결산이 끝나면 여기에 실적이 쌓입니다.</p></div>`;
   const t = v => fmt(v) + 't';
   const K = v => (v < 0 ? '−$' : '$') + fmt(Math.abs(v) / 1000) + 'k';
   const Mm = v => M(v);
@@ -522,9 +551,9 @@ function metricsPanel(s) {
   const tot = x => x.C2C + x.SLIT + x.LEVEL + x.BLANK;
   const sp = P ? P.sales : null, bp = P ? P.bs : null;
   return `<div class="card metrics">
-    <h2>경영지표 · ${R.date}</h2>
+    <h2>경영지표 · ${n > 1 ? periodLabel(R.firstTurn || R.turn, 3) : R.date}</h2>
     <table>
-      <tr><th></th><th>당월</th><th>누계</th><th>전월 대비</th></tr>
+      <tr><th></th><th>${CUR}</th><th>누계</th><th>${PRV}</th></tr>
       ${row('판매량', tot(R.sales), tot(R.cum.sales), sp && tot(sp), t, 'tot')}
       ${row('통코일', R.sales.C2C, R.cum.sales.C2C, sp && sp.C2C, t, 'sub')}
       ${row('가공 · 슬리팅', R.sales.SLIT, R.cum.sales.SLIT, sp && sp.SLIT, t, 'sub')}
@@ -619,33 +648,78 @@ function expandCard(type, L, s, ui) {
 }
 
 /* ---------- 한 달 보내기 ---------- */
+/* 지금이 몇 년 몇 월인가 / 몇 분기인가 */
+function periodLabel(turn, mpt) {
+  if ((mpt || 1) === 1) return dateLabel(turn);
+  const d = dateOf(turn);
+  return `${d.year}년 ${Math.floor((d.month - 1) / 3) + 1}분기`;
+}
+const periodNow = () => periodLabel(G.s.turn, G.mpt);
+const periodIndex = () => (G.mpt > 1 ? Math.floor((G.s.turn - 1) / 3) + 1 : G.s.turn);
+const periodTotal = () => (G.mpt > 1 ? Math.ceil(CFG.TOTAL_TURNS / 3) : CFG.TOTAL_TURNS);
+
+/* 여러 달 결산을 하나로 합친다. 잔액(재고·채권·차입)은 마지막 달 것을 쓰고,
+   손익과 물량은 기간 합계를 쓴다. */
+function mergeReports(list) {
+  if (list.length === 1) return list[0];
+  const last = list[list.length - 1];
+  const sum = k => list.reduce((a, r) => a + (r[k] || 0), 0);
+  const sumObj = k => list.reduce((a, r) => {
+    for (const p in (r[k] || {})) a[p] = (a[p] || 0) + r[k][p];
+    return a;
+  }, {});
+  return { ...last,
+    revenue: sum('revenue'), gp: sum('gp'), op: sum('op'), np: sum('np'),
+    hqMargin: sum('hqMargin'), consolidated: sum('consolidated'),
+    fixedCost: sum('fixedCost'), varCost: sum('varCost'), depreciation: sum('depreciation'),
+    interest: sum('interest'), valuationLoss: sum('valuationLoss'), badDebt: sum('badDebt'),
+    degradeLoss: sum('degradeLoss'), dumpLoss: sum('dumpLoss'), scrapRevenue: sum('scrapRevenue'),
+    shipped: sumObj('shipped'), demandAuto: sumObj('demandAuto'), sales: sumObj('sales'),
+    flags: list.flatMap(r => r.flags || []), log: list.flatMap(r => r.log || []),
+    phaseChange: list.map(r => r.phaseChange).filter(Boolean).join(' '),
+    lineReady: list.map(r => r.lineReady).filter(Boolean).join(' '),
+    months: list.length, firstTurn: list[0].turn,
+  };
+}
+
 function advance() {
-  const s = G.s, fired = [];
-  G.pending = G.pending.filter(p => {
-    if (p.turn <= s.turn) { const m = p.run(s); if (m) fired.push(m); return false; }
-    return true;
-  });
+  const months = G.mpt || 1;
+  const reports = [];
 
-  const savedY = {};
-  if (G.yieldPenalty > 0) {
-    for (const k of ['SLIT', 'LEVEL', 'TRAP', 'DIE']) { savedY[k] = CFG.YIELD[k]; CFG.YIELD[k] -= 0.015; }
-    G.yieldPenalty--;
+  for (let i = 0; i < months; i++) {
+    const s = G.s, fired = [];
+    G.pending = G.pending.filter(p => {
+      if (p.turn <= s.turn) { const m = p.run(s); if (m) fired.push(m); return false; }
+      return true;
+    });
+
+    const savedY = {};
+    if (G.yieldPenalty > 0) {
+      for (const k of ['SLIT', 'LEVEL', 'TRAP', 'DIE']) { savedY[k] = CFG.YIELD[k]; CFG.YIELD[k] -= 0.015; }
+      G.yieldPenalty--;
+    }
+    const savedFC = CFG.FC_BASE;
+    if (G.extraFixed) CFG.FC_BASE += G.extraFixed;
+
+    /* 증설·본사 지시·고객 영업은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
+       발주와 가동은 석 달 내내 그 방침대로 돈다. */
+    const ui = i === 0 ? G.ui : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null };
+    const res = resolveTurn(s, buildDecision(s, ui));
+
+    CFG.FC_BASE = savedFC;
+    for (const k in savedY) CFG.YIELD[k] = savedY[k];
+
+    G.s = res.state;
+    if (i === 0) (G.resultLines || []).forEach(m => res.report.flags.unshift(m));
+    fired.forEach(m => res.report.flags.unshift(m));
+    reports.push(res.report);
+    if (G.s.over) break;
   }
-  const savedFC = CFG.FC_BASE;
-  if (G.extraFixed) CFG.FC_BASE += G.extraFixed;
 
-  const res = resolveTurn(s, buildDecision(s, G.ui));
-
-  CFG.FC_BASE = savedFC;
-  for (const k in savedY) CFG.YIELD[k] = savedY[k];
-
-  G.s = res.state;
-  (G.resultLines || []).forEach(m => res.report.flags.unshift(m));
-  fired.forEach(m => res.report.flags.unshift(m));
   G.resultLines = [];
   G.turnDiscount = 0;
   Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null });
-  showReport(res.report);
+  showReport(mergeReports(reports));
 }
 
 function showReport(R) {
@@ -654,7 +728,7 @@ function showReport(R) {
   const ordered = Object.values(R.demandAuto).reduce((a, b) => a + b, 0);
   const lines = [...(R.phaseChange ? [R.phaseChange] : []), ...R.flags, ...R.log];
   dlg.innerHTML = `<div class="dlg">
-    <h2>${R.date} 결산</h2>
+    <h2>${R.months > 1 ? periodLabel(R.firstTurn, 3) : R.date} 결산${R.months > 1 ? ` <span class="muted" style="font-size:13px">${R.months}개월 합계</span>` : ''}</h2>
     <table><tr><td>본사 주문</td><td>${fmt(ordered)} 톤</td></tr>
       <tr class="tot"><td>납품</td>
         <td class="${shipped < ordered * .95 ? 'v neg' : 'v pos'}">${fmt(shipped)} 톤</td></tr></table>
