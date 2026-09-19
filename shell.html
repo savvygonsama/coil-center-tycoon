@@ -2,6 +2,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>코일센터 경영 시뮬레이터</title>
+
+<!-- 본문은 Pretendard, 숫자와 제목은 픽셀 폰트 Galmuri.
+     인터넷이 없으면 아래 fallback으로 내려간다. 게임은 그대로 돈다. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet"
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri/dist/galmuri.css">
 <style>
   /* ============================================================
      스틸그레이드 팔레트 + 큐비즘
@@ -307,4 +314,45 @@
 <style>
   .modecard.on{background:var(--blue-l);border-color:var(--blue);box-shadow:5px 5px 0 var(--blue)}
   .modecard.on b{color:var(--blue)}
+</style>
+<style>
+  /* ============================================================
+     글씨
+       본문 — Pretendard. 맑은 고딕보다 자간과 획이 정돈돼 있다.
+       제목·숫자·배지 — Galmuri11. 픽셀 아트와 같은 격자 위에 놓인다.
+     둘 다 CDN이라, 인터넷이 없으면 시스템 고딕으로 내려가고 게임은 그대로 돈다.
+     ============================================================ */
+  :root{
+    --sans:"Pretendard Variable",Pretendard,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+    --px:"Galmuri11","Galmuri11 Condensed",var(--sans);
+  }
+  body{font-family:var(--sans)}
+
+  /* 픽셀 폰트는 작게 쓰면 뭉개진다. 11의 배수(11·22·33)에서 제일 또렷하다. */
+  h1{font-family:var(--px);font-size:28px;letter-spacing:0;font-weight:400;line-height:1.35}
+  h2{font-family:var(--px);font-size:18px;letter-spacing:0;font-weight:400}
+  .big{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:44px}
+  .stat .v{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:18px}
+  .stat .k{letter-spacing:0}
+  .phase{font-family:var(--px);font-weight:400;font-size:13px}
+  .ltop b,.cell b{font-family:var(--px);font-weight:400;letter-spacing:0}
+  .ltop i,.cell i,.chip,.pltag,.fx span{font-family:var(--px);font-weight:400;letter-spacing:0}
+  .vchoice{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:26px}
+  .modecard b{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:22px}
+  .modecard .n{font-family:var(--px);font-weight:400;letter-spacing:0}
+  .primary{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:18px}
+  .deckhead{font-family:var(--px);font-weight:400;letter-spacing:0}
+  .crew-plate b{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:15px}
+  .optlist button b{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:17px}
+  .halltag,.hallfoot,.lbot .sub,.pstat b{font-family:var(--px);font-weight:400;letter-spacing:0}
+  table{font-family:var(--sans)}
+  td,th{letter-spacing:0}
+  tr.tot td,.metrics td.up,.metrics td.dn{font-family:var(--px);font-weight:400}
+
+  /* 픽셀 폰트는 글자 위아래 여백이 넉넉해서 줄간격을 조금 줄여야 맞는다 */
+  h1,h2,.vchoice,.modecard b,.big{line-height:1.4}
+  @media(max-width:560px){
+    h1{font-size:22px} .big{font-size:33px} .vchoice{font-size:22px}
+    .modecard b{font-size:18px} .primary{font-size:16px}
+  }
 </style>
