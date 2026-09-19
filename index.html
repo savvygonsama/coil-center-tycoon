@@ -177,6 +177,17 @@
   .face{overflow:hidden;padding:0}
   .facepic{width:100%;height:100%;object-fit:cover;display:block}
 </style>
+<style>
+  /* 공장 그림 아래 숫자 줄 — 그림 위에 흩뿌리지 않는다 */
+  .plantbar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;
+    max-width:720px;margin:10px auto 4px}
+  .pstat{display:flex;align-items:baseline;gap:6px;background:var(--chip);
+    border:1px solid var(--line);border-radius:9px;padding:4px 11px}
+  .pstat i{font-style:normal;font-size:11px;color:var(--dim)}
+  .pstat b{font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .pstat.bad{background:#fbeceb;border-color:#efcfcc}
+  .pstat.bad b{color:var(--warn)}
+</style>
 <script>
 /* ============================================================
    코일센터 경영 시뮬레이터 · 경제 엔진
@@ -2070,10 +2081,12 @@ function plTag(x, y, text, cls) {
 }
 
 /* 라인 종류별 설치 자리. 0·1번은 본동, 2번은 증축동에 들어간다. */
+/* 라인 설치 자리. 아이소메트릭 깊이축을 따라 띄워서 서로 가리지 않게 한다.
+   0·1번은 본동, 2번은 증축동. */
 const SLOT = [
-  { x: 50, y: 43.5, w: 17, z: 42 },
-  { x: 61, y: 49.0, w: 17, z: 44 },
-  { x: 26, y: 40.0, w: 15, z: 36 },
+  { x: 57, y: 36, w: 12, z: 42 },
+  { x: 66, y: 41, w: 12, z: 44 },
+  { x: 28, y: 41, w: 12, z: 36 },
 ];
 
 function plantView(s, L) {
@@ -2085,84 +2098,78 @@ function plantView(s, L) {
 
   const age = inventoryAging(s);
   const oldTon = age[2].qty + age[3].qty;
+  const afloat = s.poOpen.reduce((a, p) => a + p.qty, 0);
+  const nextEta = s.poOpen.length ? Math.min(...s.poOpen.map(p => p.etaTurn)) : null;
 
   let h = '';
 
-  /* 1. 배 — 미착 물량. 같은 도착월끼리 묶어서 최대 2척. */
-  const ships = s.poOpen.reduce((acc, p) => {
-    const k = acc.find(x => x.eta === p.etaTurn);
-    if (k) k.qty += p.qty; else acc.push({ eta: p.etaTurn, qty: p.qty });
-    return acc;
-  }, []).sort((a, b) => a.eta - b.eta).slice(0, 2);
-  ships.forEach((sh, i) => {
-    h += pl('ship.png', 21 + i * 8, 85 - i * 12, 30 - i * 5, 10 + i,
-            `${dateLabel(sh.eta)} 도착 ${fmt(sh.qty)}톤`);
-    h += plTag(21 + i * 8, 86 - i * 12, `🚢 ${dateLabel(sh.eta)} ${fmt(sh.qty)}t`);
-  });
-
-  /* 2. 공장동. 증축하면 뒤쪽에 한 동이 더 선다. */
+  /* 공장동. 증축하면 뒤쪽에 한 동이 더 선다. */
   if ((s.buildings || 1) >= 2) h += pl('bldg2.png', 27, 46, 33, 30);
   h += pl('bldg1.png', 58, 55, 46, 40);
 
-  /* 3. 설비. 그 달에 투입이 있으면 가동 컷, 없으면 정지 컷. */
+  /* 설비. 그 달에 투입이 있으면 가동 컷, 없으면 정지 컷. */
   s.lines.forEach((l, i) => {
     const slot = SLOT[i] || SLOT[2];
     const used = l.type === 'SLIT'  ? (L.now.SLIT  || 0)
                : l.type === 'LEVEL' ? (L.now.LEVEL || 0)
                : (L.now.TRAP || 0) + (L.now.DIE || 0);
-    const room = (l.type === 'SLIT' ? c.SLIT : l.type === 'LEVEL' ? c.LEVEL : c.BLANK) || CFG.LINE[l.type].cap;
+    const room = (l.type === 'SLIT' ? c.SLIT : l.type === 'LEVEL' ? c.LEVEL : c.BLANK)
+               || CFG.LINE[l.type].cap;
     const util = Math.max(0, Math.min(1, used / Math.max(1, room)));
     const on   = used > 0;
     const file = { SLIT: 'slit', LEVEL: 'level', BLANK: 'blank' }[l.type] + (on ? '_on' : '_off') + '.png';
     h += pl(file, slot.x, slot.y, slot.w, slot.z,
             `${CFG.LINE[l.type].label} · 가동률 ${Math.round(util * 100)}%`);
-    h += plTag(slot.x, slot.y + 1.5,
+    h += plTag(slot.x, slot.y + 1,
                `${CFG.LINE[l.type].label} ${Math.round(util * 100)}%`,
                on ? (util > .92 ? 'hot' : 'on') : 'off');
   });
 
-  /* 설치 중인 라인은 빈 자리로 표시한다. */
   (s.buildQueue || []).forEach((b, i) => {
     const slot = SLOT[Math.min(2, s.lines.length + i)];
     h += plTag(slot.x, slot.y, `${CFG.LINE[b.type].label} 설치 중`, 'wip');
   });
 
-  /* 4. 천장 크레인 */
-  h += pl('crane.png', 58, 40, 24, 46);
+  /* 천장 크레인 — 베이 위에 얹히는 정도로만 */
+  h += pl('crane.png', 61, 33, 14, 46);
 
-  /* 5. 소재 코일. 재고량이 곧 야드 풍경이다. */
+  /* 소재 코일. 재고량이 곧 야드 풍경이다. */
   const tier = raw <= 0 ? null
              : raw < cap * 0.25 ? { f: 'coil_s.png',    w: 17 }
              : raw < cap * 0.55 ? { f: 'coil_m.png',    w: 23 }
              : raw < cap        ? { f: 'coil_l.png',    w: 30 }
              :                    { f: 'coil_over.png', w: 35 };
-  if (tier) h += pl(tier.f, 30, 53, tier.w, 50, `소재 재고 ${fmt(raw)}톤`);
-  h += plTag(30, 54.5, `소재 ${fmt(raw)}t`, over ? 'bad' : '');
-  if (over) h += plTag(30, 59, '야드 초과 · 동선이 막혔습니다', 'bad');
+  if (tier) h += pl(tier.f, 31, 53, tier.w, 50, `소재 재고 ${fmt(raw)}톤`);
+  if (over) h += plTag(31, 55, '야드 초과 · 동선이 막혔습니다', 'bad');
 
-  /* 6. 장기재고. 방수포 덮인 코일은 이 게임의 경고등이다. */
+  /* 장기재고. 방수포 덮인 코일은 이 게임의 경고등이다. */
   if (oldTon > 0) {
-    h += pl('coil_tarp.png', 17, 48, 12, 48, `3개월 넘은 재고 ${fmt(oldTon)}톤`);
-    h += plTag(17, 49.5, `장기 ${fmt(oldTon)}t`, 'bad');
+    h += pl('coil_tarp.png', 16, 46, 12, 48, `3개월 넘은 재고 ${fmt(oldTon)}톤`);
+    h += plTag(16, 47.5, `장기 ${fmt(oldTon)}t`, 'bad');
   }
 
-  /* 7. 제품. 슬리팅 코일과 블랭킹 팔레트를 나눠 쌓는다. */
+  /* 제품 */
   const fgSlit  = s.invFg.filter(l => l.proc !== 'TRAP' && l.proc !== 'DIE').reduce((a, l) => a + l.qty, 0);
   const fgBlank = s.invFg.filter(l => l.proc === 'TRAP' || l.proc === 'DIE').reduce((a, l) => a + l.qty, 0);
-  if (fgSlit  > 0) h += pl('fg_slit.png',  70, 53, 14, 52, `가공품 ${fmt(fgSlit)}톤`);
-  if (fgBlank > 0) h += pl('fg_blank.png', 78, 49, 9, 54, `블랭크 ${fmt(fgBlank)}톤`);
-  if (fg > 0) h += plTag(72, 54.5, `제품 ${fmt(fg)}t`);
+  if (fgSlit  > 0) h += pl('fg_slit.png',  50, 59, 12, 52, `가공품 ${fmt(fgSlit)}톤`);
+  if (fgBlank > 0) h += pl('fg_blank.png', 61, 55,  9, 54, `블랭크 ${fmt(fgBlank)}톤`);
 
-  /* 8. 스크랩·지게차·트럭 — 살아 있는 공장의 기척 */
-  h += pl('scrap.png', 60, 59, 7, 51);
-  if (raw > 0) h += pl('forklift.png', 43, 63, 11, 56);
-  h += pl('truck.png', 72, 84, 21, 60);
-  h += plTag(72, 85.5, '출하');
+  h += pl('scrap.png', 38, 60, 7, 51);
+
+  /* 숫자는 그림 위에 흩뿌리지 않고 아래 한 줄로 모은다. */
+  const stat = (k, v, cls) => `<span class="pstat ${cls || ''}"><i>${k}</i><b>${v}</b></span>`;
+  const bar = [
+    stat('미착', afloat > 0 ? `${fmt(afloat)}t · ${dateLabel(nextEta)}` : '없음'),
+    stat('소재', `${fmt(raw)}t`, over ? 'bad' : ''),
+    stat('제품', `${fmt(fg)}t`),
+    stat('장기', oldTon > 0 ? `${fmt(oldTon)}t` : '없음', oldTon > 0 ? 'bad' : ''),
+  ].join('');
 
   return `<div class="plantwrap">
     <img class="plbase" src="${ART}base.jpg" alt="코일센터 전경">
     ${h}
-  </div>`;
+  </div>
+  <div class="plantbar">${bar}</div>`;
 }
 
 /* ---------- 렌더 ---------- */

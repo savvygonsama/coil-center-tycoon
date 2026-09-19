@@ -177,3 +177,14 @@
   .face{overflow:hidden;padding:0}
   .facepic{width:100%;height:100%;object-fit:cover;display:block}
 </style>
+<style>
+  /* 공장 그림 아래 숫자 줄 — 그림 위에 흩뿌리지 않는다 */
+  .plantbar{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;
+    max-width:720px;margin:10px auto 4px}
+  .pstat{display:flex;align-items:baseline;gap:6px;background:var(--chip);
+    border:1px solid var(--line);border-radius:9px;padding:4px 11px}
+  .pstat i{font-style:normal;font-size:11px;color:var(--dim)}
+  .pstat b{font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .pstat.bad{background:#fbeceb;border-color:#efcfcc}
+  .pstat.bad b{color:var(--warn)}
+</style>
