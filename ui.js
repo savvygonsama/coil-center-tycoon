@@ -352,7 +352,7 @@ function pl(file, x, y, w, z, title) {
        + ` style="left:${x}%;top:${y}%;width:${w}%;z-index:${z}">`;
 }
 
-/* 공장동 — 부지는 빼고 건물만. 증축하면 같은 동이 하나 더 선다. */
+/* 공장동 — 건물이 칸을 꽉 채운다. 증축하면 같은 동이 하나 더 선다. */
 function hallView(s) {
   const n = s.buildings || 1;
   const halls = [];
@@ -361,12 +361,12 @@ function hallView(s) {
       <img class="hallcrane" src="${A('crane.png')}" alt="">
       <span class="halltag">${i + 1}동</span>
     </div>`);
-  return `<div class="halls">${halls.join('')}
-    <div class="hallfoot">공장동 ${n}동 · 라인 ${s.lines.length} / ${CFG.MAX_LINES}
-      ${(s.buildQueue || []).length ? ` · 설치 중 ${(s.buildQueue || []).length}건` : ''}</div></div>`;
+  return `<div class="halls">${halls.join('')}</div>
+    <div class="hallfoot">공장동 ${n}동 · 라인 ${s.lines.length} / ${CFG.MAX_LINES}${
+      (s.buildQueue || []).length ? ` · 설치 중 ${(s.buildQueue || []).length}건` : ''}</div>`;
 }
 
-/* 설비 — 위에서 아래로 한 줄씩. 돌면 컬러, 서면 회색. */
+/* 설비 — 위에서 아래로. 기계가 주인공이고, 가동률은 그 밑에 한 줄로만 붙는다. */
 function lineList(s, L) {
   const c = L.c;
   const rows = s.lines.map(l => {
@@ -379,26 +379,22 @@ function lineList(s, L) {
     const on = used > 0, pct = Math.round(util * 100);
     const file = { SLIT: 'slit', LEVEL: 'level', BLANK: 'blank' }[l.type] + (on ? '_on' : '_off') + '.png';
     return `<div class="lrow ${on ? '' : 'idle'}">
+      <div class="ltop"><b>${CFG.LINE[l.type].label}</b>
+        <i class="${on ? (util > .92 ? 'hot' : 'on') : 'off'}">${on ? `가동 ${pct}%` : '정지'}</i></div>
       <img src="${A(file)}" alt="">
-      <div class="linfo">
-        <div class="ltop"><b>${CFG.LINE[l.type].label}</b>
-          <i class="${on ? (util > .92 ? 'hot' : 'on') : 'off'}">${on ? `가동 ${pct}%` : '정지'}</i></div>
+      <div class="lbot">
         <span class="track"><span class="fill ${util > .92 ? 'over' : ''}" style="width:${pct}%"></span></span>
-        <span class="sub">${fmt(used)} / ${fmt(room)} 톤</span>
-      </div></div>`;
+        <span class="sub">${fmt(used)} / ${fmt(room)}톤</span></div></div>`;
   });
 
-  (s.buildQueue || []).forEach(b => rows.push(`<div class="lrow wip">
-    <div class="ph">설치 중</div>
-    <div class="linfo"><div class="ltop"><b>${CFG.LINE[b.type].label}</b>
-      <i class="wip">${dateLabel(b.readyTurn)}부터</i></div>
-      <span class="sub">아직 돈만 나갑니다</span></div></div>`));
+  (s.buildQueue || []).forEach(b => rows.push(`<div class="lrow slim">
+    <div class="ltop"><b>${CFG.LINE[b.type].label}</b><i class="wip">설치 중</i></div>
+    <div class="ph">${dateLabel(b.readyTurn)}부터 가동 · 그때까지는 돈만 나갑니다</div></div>`));
 
   const left = CFG.MAX_LINES - s.lines.length - (s.buildQueue || []).length;
-  for (let i = 0; i < left; i++) rows.push(`<div class="lrow empty">
-    <div class="ph">빈 자리</div>
-    <div class="linfo"><div class="ltop"><b>—</b></div>
-      <span class="sub">증설하면 여기 들어갑니다</span></div></div>`);
+  for (let i = 0; i < left; i++) rows.push(`<div class="lrow slim">
+    <div class="ltop"><b>빈 자리</b><i class="off">—</i></div>
+    <div class="ph">증설하면 여기 들어갑니다</div></div>`);
 
   return `<div class="lines">${rows.join('')}</div>`;
 }
