@@ -158,7 +158,7 @@ function clearHall() {
 function exportHall() {
   const all = hallRecords();
   if (!all.length) { toast('아직 기록이 없습니다.'); return; }
-  const head = ['끝낸 날짜', '회사', '난이도', '주기', '개월', '등급', '본사이익($)', '자기자본($)',
+  const head = ['끝낸 날짜', '회사', '난이도', '주기', '개월', '등급', '모법이익($)', '자기자본($)',
                 '누적영업이익($)', '점유율(%)', '경영 스타일', '고장', '클레임', '결품', '양보'];
   const rows = all.map(r => [
     new Date(r.at).toLocaleString('ko-KR'), r.company, r.diff, r.mode, r.months, r.grade,
@@ -182,10 +182,10 @@ function hallPanel() {
   const best = all.reduce((a, b) => (b.hq > a.hq ? b : a), all[0]);
   return `<div class="card records">
     <h2>명예의 전당 <span class="muted">— 끝낸 판 ${all.length}회</span></h2>
-    <p class="hint">최고 기록은 <b>${best.company}</b> · ${best.diff} · ${best.grade}등급 · 본사이익 ${M1(best.hq)}입니다.</p>
+    <p class="hint">최고 기록은 <b>${best.company}</b> · ${best.diff} · ${best.grade}등급 · 모법이익 ${M1(best.hq)}입니다.</p>
     <div class="rectbl"><table>
       <tr><th>끝낸 날</th><th>회사</th><th>난이도</th><th>개월</th><th>등급</th>
-          <th>본사이익</th><th>자기자본</th><th>경영 스타일</th></tr>
+          <th>모법이익</th><th>자기자본</th><th>경영 스타일</th></tr>
       ${all.slice(0, 12).map(r => `<tr>
         <td>${new Date(r.at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}</td>
         <td class="hname">${r.company}</td>

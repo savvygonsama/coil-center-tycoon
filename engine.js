@@ -1137,6 +1137,7 @@ function resolveTurn(state, decision) {
      코일센터 단독 손익과 본사 실적이 갈라지는 자리가 정확히 여기다. */
   const materialTons = d.buy.totalTon * Math.max(0, Math.min(1, d.buy.beta || 0)) + hqSpotTon;
   const hqMargin = hqPerTon * materialTons;
+  // 모법이익 — 모사(본사 철강사) 마진 + 법인(코일센터) 영업이익. 화면 표기는 "모법이익".
   const consolidated = op + hqMargin;
   s.hq.cumMaterialTons += materialTons;
   s.hq.cumHqMargin += hqMargin;
@@ -1264,10 +1265,14 @@ function resolveTurn(state, decision) {
      2순위 — 그러고 나서 법인 자체의 이익과 건전성.
    그래서 이 등급은 가중합이 아니라 사전식(lexicographic)이다. 수행률이 먼저 읽히고,
    법인 손익은 같은 수행률 안에서만 등급을 가른다.
-   "본사는 이겼습니다"가 "혼자만 이겼습니다"보다 위에 있는 이유가 이것이다. */
+   "본사는 이겼습니다"가 "혼자만 이겼습니다"보다 위에 있는 이유가 이것이다.
+
+   consol은 화면에서 "모법이익"이라 부른다 — 모사(본사 철강사)가 소재를 팔아 번 돈에
+   법인(코일센터)의 영업이익을 더한 것. 본사가 이 법인을 세운 이유가 이 숫자다.
+   법인 혼자 잘 버는 것과는 다르다: 일반재를 늘려 법인 손익만 챙기면 모사 몫은 안 늘어난다. */
 function grade(state, target = 45_000_000) {
   const soloOp = state.history.reduce((a, h) => a + h.op, 0);
-  const consol = state.hq.cumConsolidated;
+  const consol = state.hq.cumConsolidated;   // 모법이익 = 모사 마진 + 법인 영업이익
   const dem = state.hq.cumAutoDemand || 0;
   const fulfil = dem > 0 ? (state.hq.cumAutoShipped || 0) / dem : 0;   // 실수요 수행률
   const survived = state.overReason === 'COMPLETE';

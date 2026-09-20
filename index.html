@@ -1654,6 +1654,7 @@ function resolveTurn(state, decision) {
      코일센터 단독 손익과 본사 실적이 갈라지는 자리가 정확히 여기다. */
   const materialTons = d.buy.totalTon * Math.max(0, Math.min(1, d.buy.beta || 0)) + hqSpotTon;
   const hqMargin = hqPerTon * materialTons;
+  // 모법이익 — 모사(본사 철강사) 마진 + 법인(코일센터) 영업이익. 화면 표기는 "모법이익".
   const consolidated = op + hqMargin;
   s.hq.cumMaterialTons += materialTons;
   s.hq.cumHqMargin += hqMargin;
@@ -1781,10 +1782,14 @@ function resolveTurn(state, decision) {
      2순위 — 그러고 나서 법인 자체의 이익과 건전성.
    그래서 이 등급은 가중합이 아니라 사전식(lexicographic)이다. 수행률이 먼저 읽히고,
    법인 손익은 같은 수행률 안에서만 등급을 가른다.
-   "본사는 이겼습니다"가 "혼자만 이겼습니다"보다 위에 있는 이유가 이것이다. */
+   "본사는 이겼습니다"가 "혼자만 이겼습니다"보다 위에 있는 이유가 이것이다.
+
+   consol은 화면에서 "모법이익"이라 부른다 — 모사(본사 철강사)가 소재를 팔아 번 돈에
+   법인(코일센터)의 영업이익을 더한 것. 본사가 이 법인을 세운 이유가 이 숫자다.
+   법인 혼자 잘 버는 것과는 다르다: 일반재를 늘려 법인 손익만 챙기면 모사 몫은 안 늘어난다. */
 function grade(state, target = 45_000_000) {
   const soloOp = state.history.reduce((a, h) => a + h.op, 0);
-  const consol = state.hq.cumConsolidated;
+  const consol = state.hq.cumConsolidated;   // 모법이익 = 모사 마진 + 법인 영업이익
   const dem = state.hq.cumAutoDemand || 0;
   const fulfil = dem > 0 ? (state.hq.cumAutoShipped || 0) / dem : 0;   // 실수요 수행률
   const survived = state.overReason === 'COMPLETE';
@@ -4646,7 +4651,7 @@ function renderSetup() {
       <div class="modes">${diffBtn(DIFF.normal)}${diffBtn(DIFF.hard)}</div>
       <p class="hint">하드는 자본금이 적은 만큼 빚이 많고 이자가 5%입니다. 물려받는 물량도 적은데
         창고에는 전임자가 남긴 장기재고 <b>1만 톤</b>이 서 있습니다.
-        본사가 요구하는 이익 목표도 ${M(DIFF.normal.target)}에서 <b>${M(DIFF.hard.target)}</b>로 올라갑니다.
+        본사가 요구하는 모법이익 목표도 ${M(DIFF.normal.target)}에서 <b>${M(DIFF.hard.target)}</b>로 올라갑니다.
         S등급은 거의 안 나옵니다.</p>
     </div>
 
@@ -5346,8 +5351,8 @@ function showReport(R) {
       <tr class="tot"><td>우리 회사 영업이익</td>
         <td class="${R.op < 0 ? 'v neg' : 'v pos'}">${money(R.op)}</td></tr></table>
     <div class="sep"></div>
-    <table><tr><td>본사가 우리에게 소재 팔아 번 돈</td><td>${money(R.hqMargin)}</td></tr>
-      <tr class="tot"><td>본사 이익 (우리 + 본사)</td>
+    <table><tr><td>모사가 우리에게 소재 팔아 번 돈</td><td>${money(R.hqMargin)}</td></tr>
+      <tr class="tot"><td>모법이익 <span class="muted" style="font-weight:600">모사 + 법인</span></td>
         <td class="${R.consolidated < 0 ? 'v neg' : 'v pos'}">${money(R.consolidated)}</td></tr></table>
     ${R.lineReady ? `<div class="note good">${R.lineReady}</div>` : ''}
     ${G.W && G.W.fired.length ? `<div class="sep"></div><h2>돌아온 청구서</h2>${G.W.fired.map(f =>
@@ -5400,8 +5405,8 @@ function renderEnd() {
           <tr><td>누적 판매량</td><td>${fmt(m.tons)}t</td></tr>
           <tr><td>누적 영업이익</td><td class="${m.op < 0 ? 'v neg' : 'v pos'}">${k(m.op)}</td></tr>
           <tr><td>톤당 평균 영업이익</td><td>$${m.margin.toFixed(1)}/t</td></tr>
-          <tr><td>본사 소재 판매량</td><td>${fmt(m.hqTons)}t</td></tr>
-          <tr><td>본사 이익 (우리 + 본사)</td><td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${k(g.consol)}</td></tr>
+          <tr><td>모사 소재 판매량</td><td>${fmt(m.hqTons)}t</td></tr>
+          <tr><td>모법이익 <span class="muted">모사 + 법인</span></td><td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${k(g.consol)}</td></tr>
           <tr><td>본사 내시 수행률</td><td>${Math.round(g.fulfil * 100)}%</td></tr>
           ${hqRows}
           <tr><td>평균 가동률</td><td>${Math.round(m.util * 100)}%</td></tr>
@@ -5604,7 +5609,7 @@ function clearHall() {
 function exportHall() {
   const all = hallRecords();
   if (!all.length) { toast('아직 기록이 없습니다.'); return; }
-  const head = ['끝낸 날짜', '회사', '난이도', '주기', '개월', '등급', '본사이익($)', '자기자본($)',
+  const head = ['끝낸 날짜', '회사', '난이도', '주기', '개월', '등급', '모법이익($)', '자기자본($)',
                 '누적영업이익($)', '점유율(%)', '경영 스타일', '고장', '클레임', '결품', '양보'];
   const rows = all.map(r => [
     new Date(r.at).toLocaleString('ko-KR'), r.company, r.diff, r.mode, r.months, r.grade,
@@ -5628,10 +5633,10 @@ function hallPanel() {
   const best = all.reduce((a, b) => (b.hq > a.hq ? b : a), all[0]);
   return `<div class="card records">
     <h2>명예의 전당 <span class="muted">— 끝낸 판 ${all.length}회</span></h2>
-    <p class="hint">최고 기록은 <b>${best.company}</b> · ${best.diff} · ${best.grade}등급 · 본사이익 ${M1(best.hq)}입니다.</p>
+    <p class="hint">최고 기록은 <b>${best.company}</b> · ${best.diff} · ${best.grade}등급 · 모법이익 ${M1(best.hq)}입니다.</p>
     <div class="rectbl"><table>
       <tr><th>끝낸 날</th><th>회사</th><th>난이도</th><th>개월</th><th>등급</th>
-          <th>본사이익</th><th>자기자본</th><th>경영 스타일</th></tr>
+          <th>모법이익</th><th>자기자본</th><th>경영 스타일</th></tr>
       ${all.slice(0, 12).map(r => `<tr>
         <td>${new Date(r.at).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })}</td>
         <td class="hname">${r.company}</td>

@@ -677,7 +677,7 @@ function renderSetup() {
       <div class="modes">${diffBtn(DIFF.normal)}${diffBtn(DIFF.hard)}</div>
       <p class="hint">하드는 자본금이 적은 만큼 빚이 많고 이자가 5%입니다. 물려받는 물량도 적은데
         창고에는 전임자가 남긴 장기재고 <b>1만 톤</b>이 서 있습니다.
-        본사가 요구하는 이익 목표도 ${M(DIFF.normal.target)}에서 <b>${M(DIFF.hard.target)}</b>로 올라갑니다.
+        본사가 요구하는 모법이익 목표도 ${M(DIFF.normal.target)}에서 <b>${M(DIFF.hard.target)}</b>로 올라갑니다.
         S등급은 거의 안 나옵니다.</p>
     </div>
 
@@ -1377,8 +1377,8 @@ function showReport(R) {
       <tr class="tot"><td>우리 회사 영업이익</td>
         <td class="${R.op < 0 ? 'v neg' : 'v pos'}">${money(R.op)}</td></tr></table>
     <div class="sep"></div>
-    <table><tr><td>본사가 우리에게 소재 팔아 번 돈</td><td>${money(R.hqMargin)}</td></tr>
-      <tr class="tot"><td>본사 이익 (우리 + 본사)</td>
+    <table><tr><td>모사가 우리에게 소재 팔아 번 돈</td><td>${money(R.hqMargin)}</td></tr>
+      <tr class="tot"><td>모법이익 <span class="muted" style="font-weight:600">모사 + 법인</span></td>
         <td class="${R.consolidated < 0 ? 'v neg' : 'v pos'}">${money(R.consolidated)}</td></tr></table>
     ${R.lineReady ? `<div class="note good">${R.lineReady}</div>` : ''}
     ${G.W && G.W.fired.length ? `<div class="sep"></div><h2>돌아온 청구서</h2>${G.W.fired.map(f =>
@@ -1431,8 +1431,8 @@ function renderEnd() {
           <tr><td>누적 판매량</td><td>${fmt(m.tons)}t</td></tr>
           <tr><td>누적 영업이익</td><td class="${m.op < 0 ? 'v neg' : 'v pos'}">${k(m.op)}</td></tr>
           <tr><td>톤당 평균 영업이익</td><td>$${m.margin.toFixed(1)}/t</td></tr>
-          <tr><td>본사 소재 판매량</td><td>${fmt(m.hqTons)}t</td></tr>
-          <tr><td>본사 이익 (우리 + 본사)</td><td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${k(g.consol)}</td></tr>
+          <tr><td>모사 소재 판매량</td><td>${fmt(m.hqTons)}t</td></tr>
+          <tr><td>모법이익 <span class="muted">모사 + 법인</span></td><td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${k(g.consol)}</td></tr>
           <tr><td>본사 내시 수행률</td><td>${Math.round(g.fulfil * 100)}%</td></tr>
           ${hqRows}
           <tr><td>평균 가동률</td><td>${Math.round(m.util * 100)}%</td></tr>
