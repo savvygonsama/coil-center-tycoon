@@ -236,36 +236,48 @@ window.addEventListener('appinstalled', () => {
 });
 
 /* 첫 화면 설치 안내.
-   크롬·엣지·삼성인터넷은 버튼 한 번으로 깔린다.
-   아이폰 사파리는 beforeinstallprompt를 안 주므로 손으로 하는 법을 적어준다. */
+   기기별 안내를 전부 같이 띄운다 — PC에서 보고 있어도 아이폰 쓰는 사람에게
+   알려줄 수 있어야 한다. 지금 이 기기에 해당하는 칸만 강조한다.
+   크롬·엣지·삼성인터넷은 beforeinstallprompt가 와서 버튼 한 번으로 깔리고,
+   아이폰 사파리는 그 이벤트를 안 주므로 손으로 하는 법을 적어준다. */
 function installPanel() {
-  if (isStandalone() || installedFlag)
-    return `<div class="card install done" id="install">
-      <h2>앱으로 실행 중입니다</h2>
-      <p class="hint">홈 화면 아이콘으로 열렸습니다. 비행기 안에서도 돌아갑니다.</p></div>`;
+  const ios = isIOS();
 
-  if (installPrompt)
-    return `<div class="card install" id="install">
-      <h2>휴대폰에 앱으로 설치하기</h2>
-      <p class="hint">홈 화면에 아이콘이 생기고, 주소창 없이 전체 화면으로 열립니다.
-        인터넷이 없어도 돌아갑니다.</p>
-      <button class="primary" id="btn-install">지금 설치</button></div>`;
+  const android = `<div class="iway ${!ios && installPrompt ? 'on' : ''}">
+    <h3>🤖 안드로이드 · PC</h3>
+    ${installPrompt
+      ? `<p>아래 버튼 한 번이면 끝입니다.</p>
+         <button class="primary" id="btn-install">지금 설치</button>`
+      : `<ol class="steps">
+           <li>크롬(또는 엣지·삼성인터넷)으로 이 주소를 엽니다</li>
+           <li>오른쪽 위 <b>⋮</b> → <b>「앱 설치」</b> 또는 <b>「홈 화면에 추가」</b></li>
+           <li>PC는 주소창 오른쪽 <b>설치 아이콘</b>(⊕)을 눌러도 됩니다</li>
+         </ol>`}
+  </div>`;
 
-  if (isIOS())
-    return `<div class="card install" id="install">
-      <h2>아이폰에 앱으로 설치하기</h2>
-      <ol class="steps">
-        <li>사파리 아래쪽 <b>공유 버튼</b>(↑)을 누릅니다</li>
-        <li>메뉴를 내려서 <b>「홈 화면에 추가」</b>를 누릅니다</li>
-        <li>오른쪽 위 <b>「추가」</b>를 누르면 끝입니다</li>
-      </ol>
-      <p class="hint">크롬이 아니라 <b>사파리</b>로 열어야 이 메뉴가 나옵니다.</p></div>`;
+  const iphone = `<div class="iway ${ios ? 'on' : ''}">
+    <h3>📱 아이폰 · 아이패드</h3>
+    <ol class="steps">
+      <li><b>사파리</b>로 이 주소를 엽니다 <span class="muted">(크롬으로 열면 이 메뉴가 없습니다)</span></li>
+      <li>화면 아래 가운데 <b>공유 버튼</b> <b>⬆︎</b> 을 누릅니다
+        <span class="muted">(아이패드는 오른쪽 위)</span></li>
+      <li>메뉴를 아래로 내려 <b>「홈 화면에 추가」</b>를 누릅니다</li>
+      <li>오른쪽 위 <b>「추가」</b>를 누르면 홈 화면에 아이콘이 생깁니다</li>
+    </ol>
+  </div>`;
 
-  return `<div class="card install" id="install">
-    <h2>휴대폰에 앱으로 설치하기</h2>
-    <p class="hint">안드로이드는 크롬 오른쪽 위 <b>⋮ → 「앱 설치」</b>,
-      PC는 주소창 오른쪽 <b>설치 아이콘</b>을 누르면 앱으로 깔립니다.
-      깔아두면 인터넷이 없어도 돌아갑니다.</p></div>`;
+  const head = (isStandalone() || installedFlag)
+    ? `<h2>앱으로 실행 중입니다</h2>
+       <p class="hint">홈 화면 아이콘으로 열렸습니다. 비행기 안에서도 돌아갑니다.
+         다른 기기에 깔려면 아래를 보여주십시오.</p>`
+    : `<h2>휴대폰에 앱으로 설치하기</h2>
+       <p class="hint">홈 화면에 아이콘이 생기고, 주소창 없이 전체 화면으로 열립니다.
+         한 번 깔아두면 인터넷이 없어도 돌아갑니다.</p>`;
+
+  return `<div class="card install${isStandalone() || installedFlag ? ' done' : ''}" id="install">
+    ${head}
+    <div class="iways">${ios ? iphone + android : android + iphone}</div>
+  </div>`;
 }
 
 function wireInstall() {

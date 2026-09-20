@@ -3,7 +3,7 @@
 
    CACHE 이름의 숫자를 올리면 예전 캐시를 통째로 버리고 새로 받는다.
    index.html을 새로 배포할 때마다 올려야 사람들 화면이 갱신된다. */
-const CACHE = 'coilcenter-v2';
+const CACHE = 'coilcenter-v3';
 const SHELL = [
   './',
   './index.html',

@@ -409,51 +409,51 @@ function briefing(s, W) {
   const say = (who, kind, text, w) => out.push({ who, kind, text, w });
 
   // 생산 — 구 공장장. 숫자를 직접 본다. 대신 괜찮을 때는 말이 없다.
-  if (W.equip < 48) say('gu', '확인', `2호 라인 진동 수치가 평소보다 높습니다. 베어링 쪽입니다. 마지막 정비가 ${W.maintAge}개월 전입니다.`, 9);
-  else if (W.equip < 62) say('gu', wChance(0.8) ? '추정' : '소문', `라인 소리가 좀 달라졌습니다. 당장은 괜찮은데, 오래는 모르겠습니다.`, 6);
-  else if (wChance(0.12)) say('gu', '추정', `슬리터 나이프 쪽이 좀 신경 쓰입니다. 큰일은 아닙니다.`, 3);   // 가끔은 헛걱정
-  if (W.fatigue > 35) say('gu', '확인', `반장들이 지쳐 있습니다. 석 달째 특근입니다.`, 7);
+  if (W.equip < 48) say('gu', '확인', `2호 라인 진동이 평소보다 높심더. 베어링 쪽입니더. 정비한 지 ${W.maintAge}개월 됐고예.`, 9);
+  else if (W.equip < 62) say('gu', wChance(0.8) ? '추정' : '소문', `기계 소리가 좀 달라졌심더. 당장이야 돌아가는데, 오래는 모르겠습니더.`, 6);
+  else if (wChance(0.12)) say('gu', '추정', `슬리터 나이프 쪽이 좀 걸립니더. 큰일은 아이고예.`, 3);   // 가끔은 헛걱정
+  if (W.fatigue > 35) say('gu', '확인', `반장들 얼굴이 말이 아입니더. 석 달째 특근 아입니꺼.`, 7);
 
   // 소재 발주 — 정 부장. 영업이 내시를 보고 소재를 건다. 본사 가격은 본사 영업팀 소문으로 듣는다.
   const sn = stockNow(s);
-  if (W.priceRumor === 1) say('jung', '소문', `본사 영업팀 동기 얘기로는 다음 분기에 소재값을 올린답니다. 확정은 아니고요.`, 6);
-  else if (W.priceRumor === -1) say('jung', '소문', `본사 재고가 많이 쌓였답니다. 다음 분기엔 값이 내려갈 수도 있다는데, 반쯤은 소문입니다.`, 6);
-  if (cov < COVER.warn) say('jung', '확인', `재고율이 ${cov.toFixed(1)}개월밖에 안 됩니다. 본사에서 생산 중인 것까지 쳐도 ${sn.resM.toFixed(1)}개월이라, 결품 날까 봐 조마조마합니다.`, 9);
-  else if (cov > COVER.heavy) say('jung', '확인', `재고율 ${cov.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월입니다. 영업 입장에선 든든한데 한 부장님 표정이 안 좋습니다.`, 6);
+  if (W.priceRumor === 1) say('jung', '소문', `본사 영업팀 제 동기 얘긴데, 다음 분기에 소재값 올린답니다. 확정은 아닙니다만 저는 믿습니다.`, 6);
+  else if (W.priceRumor === -1) say('jung', '소문', `본사 재고가 꽤 쌓였답니다. 다음 분기에 값이 빠질 수도 있는데, 이건 반은 소문입니다.`, 6);
+  if (cov < COVER.warn) say('jung', '확인', `재고율 ${cov.toFixed(1)}개월입니다. 본사 생산 중인 것까지 다 쳐도 ${sn.resM.toFixed(1)}개월이고요. 이건 위험합니다.`, 9);
+  else if (cov > COVER.heavy) say('jung', '확인', `재고율 ${cov.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월. 저는 든든합니다. 한 부장님은 저를 째려봅니다.`, 6);
 
   // 자재 — 서 대리. 비품·포장재·MRO. 현장이 잘 안 보는 것들을 본다.
-  if (W.spares === false && W.equip < 60) say('seo', '확인', `베어링이랑 유압호스 예비품이 바닥이에요… 설비가 서면 부품 오는 데 열흘은 걸립니다.`, 7);
-  if (W.packCheap) say('seo', '추정', `바꾼 포장재 업체 방청지가 좀 얇은 것 같아요. 우기에 괜찮을지 모르겠습니다.`, 5);
+  if (W.spares === false && W.equip < 60) say('seo', '확인', `저… 베어링이랑 유압호스 예비품이 거의 없어요. 지금 서면 부품 오는 데 열흘입니다.`, 7);
+  if (W.packCheap) say('seo', '추정', `새로 바꾼 방청지가 좀 얇은 것 같은데요… 우기에 괜찮을지 제가 확신이 안 섭니다.`, 5);
 
   // 영업 — 정 부장. 시장 소문을 제일 먼저 듣는데, 부풀린다.
   const ks = Object.keys(CUST).filter(k => (s.custShare[k] || 0) > 0.06);
   const rumK = ks.find(k => W.threat[k] ? wChance(0.75) : wChance(0.08));
-  if (rumK) say('jung', '소문', `${cname(rumK)}에 경쟁사가 톤당 $${wPick([15, 18, 20, 25])} 낮게 들어갔다는 얘기가 있습니다.`, 8);
+  if (rumK) say('jung', '소문', `${cname(rumK)}에 경쟁사가 톤당 $${wPick([4, 5, 6, 8])} 낮게 들어갔다는 얘기가 돕니다.`, 8);
   const cold = ks.filter(k => W.rel[k] < 50).sort((a, b) => W.rel[a] - W.rel[b])[0];
-  if (cold) say('jung', '추정', `${cname(cold)} 구매팀 분위기가 싸늘합니다. 전화를 잘 안 받습니다.`, 7);
+  if (cold) say('jung', '추정', `${cname(cold)} 구매팀이 싸늘합니다. 제 전화를 세 번 안 받았습니다. 영업 십오 년에 이건 신호입니다.`, 7);
   const warm = ks.find(k => W.relHigh[k] >= 2);
-  if (warm && wChance(0.6)) say('jung', '추정', `${cname(warm)} 쪽은 요즘 우리한테 호의적입니다. 뭔가 더 맡길 눈치입니다.`, 5);
+  if (warm && wChance(0.6)) say('jung', '추정', `${cname(warm)} 쪽 분위기가 좋습니다. 뭘 더 맡길 눈치인데, 제가 한번 찔러보겠습니다.`, 5);
 
   // 재무 — 한 부장. 숫자만 말한다. 틀리지 않는다.
-  if (run < 1.6) say('han', '확인', `결론부터 말씀드리면, 지금 현금과 한도로 버틸 수 있는 건 ${run.toFixed(1)}개월입니다. 큰 구매는 부담입니다.`, 9);
+  if (run < 1.6) say('han', '확인', `결론부터. 현금과 한도 다 긁어서 ${run.toFixed(1)}개월입니다. 지금 큰 결재를 올리시면 제가 말리겠습니다.`, 9);
   const delayed = s.ar.filter(a => a.delayed).reduce((a, x) => a + x.amount, 0);
-  if (delayed > 500_000) say('han', '확인', `대금이 늦어지는 곳이 있습니다. 밀린 게 $${fmt(delayed / 1000)}k입니다.`, 6);
+  if (delayed > 500_000) say('han', '확인', `밀린 대금이 $${fmt(delayed / 1000)}k입니다. 다들 "곧 드리겠다"고 합니다. 곧이 언제인지는 안 적혀 있습니다.`, 6);
   const topK = topCust(s);
-  if ((s.custShare[topK] || 0) > 0.45) say('han', '확인', `${cname(topK)} 비중이 ${Math.round(s.custShare[topK] * 100)}%입니다. 한 곳이 흔들리면 회사가 흔들립니다.`, 6);
+  if ((s.custShare[topK] || 0) > 0.45) say('han', '확인', `${cname(topK)} 비중이 ${Math.round(s.custShare[topK] * 100)}%입니다. 한 군데가 감기 걸리면 우리가 입원합니다.`, 6);
 
   // 품질 — 오 과장. 추세를 본다.
   const qs = W.snaps.slice(-3).map(x => x.quality);
-  if (W.quality < 66) say('oh', '확인', `불량률이 올라가고 있습니다. 최근 ${CUST[topK]}향 제품에서 미세 표면 결함이 늘었습니다.`, 8);
-  else if (qs.length === 3 && qs[2] < qs[0] - 0.25) say('oh', '추정', `석 달째 품질 지표가 조금씩 내려갑니다. 아직 고객은 모릅니다.`, 6);
+  if (W.quality < 66) say('oh', '확인', `양품률 ${qualityPct(W.quality).toFixed(1)}%. ${CUST[topK]}향 로트에서 미세 표면 결함 검출이 늘었습니다. 수치로는 이미 넘었습니다.`, 8);
+  else if (qs.length === 3 && qs[2] < qs[0] - 0.25) say('oh', '추정', `석 달 연속 하락입니다. 폭은 작습니다. 다만 세 번 연속이면 추세로 봅니다. 아직 고객은 모릅니다.`, 6);
 
   // 현지 — 린 매니저. 사람 얘기.
-  if (s.morale < 50) say('lin', '추정', `사장님, 현장 분위기가 안 좋아요. 옆 공단 얘기를 하는 사람이 늘었어요.`, 7);
+  if (s.morale < 50) say('lin', '추정', `사장님, 요즘 현장 분위기 안 좋아요. 점심시간에 옆 공단 얘기하는 사람 많아졌어요. 그거 보통 나가기 전에 그래요.`, 7);
 
   // 본사 목표
   if (W.hq.target > 0) {
     const m = ((s.turn - 1) % 12);
     const pace = m > 0 ? W.hq.ytd / (W.hq.target * m / 12) : 1;
-    if (m >= 4 && pace < 0.88) say('jung', '확인', `올해 본사 소재 목표 대비 ${Math.round(pace * 100)}% 페이스입니다. 본사가 눈치를 줍니다.`, 7);
+    if (m >= 4 && pace < 0.88) say('jung', '확인', `올해 본사 목표 대비 ${Math.round(pace * 100)}% 페이스입니다. 본사에서 전화 올 때마다 안부부터 묻습니다. 그게 더 무섭습니다.`, 7);
   }
 
   out.sort((a, b) => b.w - a.w);

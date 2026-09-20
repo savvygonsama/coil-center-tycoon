@@ -97,9 +97,15 @@
   /* 이어하기 · 설치 안내 · 명예의 전당 */
   .records{border-color:var(--ink)}
   .resume{border-color:var(--blue);box-shadow:5px 5px 0 var(--blue-l)}
-  .install.done{opacity:.8}
-  .install .steps{margin:8px 0 6px;padding-left:20px;font-size:14px;line-height:1.85}
+  .install .steps{margin:6px 0 2px;padding-left:20px;font-size:14px;line-height:1.8}
   .install .steps b{color:var(--blue)}
+  .iways{display:grid;gap:12px;margin-top:12px}
+  @media(min-width:760px){ .iways{grid-template-columns:1fr 1fr} }
+  .iway{border:2px solid var(--line);background:var(--panel2);padding:12px 14px 13px}
+  .iway.on{border-color:var(--blue);background:var(--blue-l)}
+  .iway h3{margin:0 0 6px;font-size:15px;font-weight:800;letter-spacing:-.02em}
+  .iway p{margin:4px 0 9px;font-size:14px}
+  .iway button.primary{width:100%}
   .hbtns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
   .rectbl{overflow-x:auto;margin-top:8px}
   .rectbl table{width:100%;border-collapse:collapse;font-size:13px}

@@ -9,15 +9,37 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
 const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
 const M = n => (n < 0 ? '−$' : '$') + (Math.abs(n) / 1e6).toFixed(1) + 'M';
 
-/* 여섯 사람. 같은 사실을 보고해도 말이 다 다르게 나온다 —
+/* ============================================================
+   여섯 사람. 같은 사실을 보고해도 말이 다 다르게 나온다 —
    그게 이 회사에서 정보가 흐르는 방식이다. 누가 하는 말인지에 따라
    그대로 믿을지, 반쯤 깎아들을지 사장이 정해야 한다.
-     정 부장  자신만만하고 밀어붙인다. 숫자를 크게 부른다. 낙관이 섞여 있다
-     서 대리  과하게 공손하고 조심스럽다. 결론을 늦게 말한다. 대신 거짓말을 안 한다
-     구 공장장 경상도 사투리. 기계 이야기는 틀린 적이 없다. 돈 이야기는 안 한다
-     한 부장  건조하고 시니컬하다. 결론부터 말하고 위로는 안 한다
-     오 과장  깐깐하다. 감정 없이 수치로만 말한다. 원칙에서 안 물러선다
-     린 매니저 밝고 사람 중심이다. 한국어가 조금 서툴다. 현장 분위기는 제일 먼저 안다 */
+
+   카드 대사를 쓸 때 지키는 규칙 (issues.js / decks.js / ui.js 공통):
+
+   정 부장 · 영업   남자답고 저돌적. 문장이 짧고 단정적이다. "잡습니다", "제가 책임집니다".
+                    숫자를 크게 부르고 될 거라고 먼저 말한다. 낙관이 섞여 있어서
+                    그 말만 믿으면 재고가 쌓인다. 감탄사를 자주 쓴다 — "사장님, 이거 큽니다."
+
+   한 부장 · 관리   시니컬하고 건조하다. 블랙 유머를 계속 던진다. 위로는 절대 안 한다.
+                    "결론부터 말씀드리면", "재미없는 얘기입니다", "축하드릴 일은 아닙니다".
+                    농담 끝에 늘 숫자가 붙는다. 이 회사에서 제일 정확하고 제일 정 없다.
+
+   구 공장장 · 생산 경상도 사투리. "사장님예", "~입니더", "~심더", "아입니꺼", "우짤지".
+                    무뚝뚝하고 말이 짧다. 기계 이야기는 틀린 적이 없고 돈 이야기는 안 한다.
+                    못 하겠으면 못 하겠다고 한다.
+
+   서 대리 · 구매   소심하고 과하게 공손하다. 말끝을 흐리고("…") 결론을 늦게 말한다.
+                    "저… 사장님", "죄송한데요", "괜찮으실까요?". 대신 거짓말은 안 하고,
+                    나중에 문제가 될 것을 혼자 미리 알아차리고 있다.
+
+   오 과장 · 품질   깐깐하고 감정이 없다. 수치와 로트 번호로만 말한다. 원칙에서 안 물러선다.
+                    "수치로 말씀드리면", "기록은 남기겠습니다", "규격상 안 됩니다".
+                    사장 기분을 맞춰주지 않는다.
+
+   린 매니저 · 현지 밝고 사람 중심. 한국어가 조금 서툴러서 어순이 가끔 어색하다.
+                    "사장님! 저 말씀드릴 거 있어요", "그거 여기 사람들 많이 싫어해요".
+                    현장 분위기와 소문을 제일 먼저 안다.
+   ============================================================ */
 const CAST = {
   seo:  { face: '📋', img: 'cast_seo',  name: '서 대리',   role: '구매 · 자재',
           tone: '조심스럽고 공손함' },
@@ -237,21 +259,13 @@ function openDecisions() {
     const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
 
     const paint = () => {
-      const totUse = rows.reduce((a, r) => a + r.use, 0);
-      const totRes = rows.reduce((a, r) => a + r.res, 0);
       const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
       const totRec = rows.reduce((a, r) => a + r.rec, 0);
-      const after = totUse > 0 ? (totRes + tot) / totUse : 0;
       const pct = totRec > 0 ? Math.round(tot / totRec * 100) : 100;
       const box = dlg.querySelector('#osum');
       if (box) box.innerHTML =
         `<b>합계 ${fmt(Math.round(tot))}톤</b>
-         <span class="${pct > 125 ? 'dn' : pct < 75 ? 'dn' : 'up'}">권장 대비 ${pct}%</span>
-         <span>발주 뒤 재원율 ${after.toFixed(1)}개월</span>`;
-      rows.forEach(r => {
-        const cell = dlg.querySelector(`#oaf-${r.k}`);
-        if (cell) cell.textContent = r.use > 0 ? ((r.res + (vals[r.k] || 0)) / r.use).toFixed(1) : '–';
-      });
+         <span class="${pct > 125 ? 'dn' : pct < 75 ? 'dn' : 'up'}">권장 대비 ${pct}%</span>`;
     };
 
     dlg.innerHTML = `<div class="dlg">${head}
@@ -261,7 +275,7 @@ function openDecisions() {
       <div class="ordwrap">
         <table class="ordt">
           <tr><th>고객군</th><th>월 사용<br><i>소재 기준</i></th><th>창고<br>현물</th><th>해상<br>미착</th>
-              <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th><th>발주 (톤)</th><th>발주 뒤<br>재원율</th></tr>
+              <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th><th>발주 (톤)</th></tr>
           ${rows.map(r => `<tr>
             <td class="oname">${CUST[r.k]} <i>${CFG.CUSTOMERS[r.k].name}</i></td>
             <td>${fmt(Math.round(r.use))}</td>
@@ -271,7 +285,7 @@ function openDecisions() {
             <td class="${r.invM < COVER.warn ? 'dn' : ''}">${r.invM.toFixed(1)}</td>
             <td>${r.resM.toFixed(1)}</td>
             <td><input type="number" min="0" max="${r.max}" step="50" data-ok="${r.k}" value="${r.rec}"></td>
-            <td id="oaf-${r.k}" class="oaf">–</td></tr>`).join('')}
+            </tr>`).join('')}
         </table>
         <div class="ordbar">
           <div id="osum" class="osum"></div>
@@ -1377,8 +1391,12 @@ function showReport(R) {
       <tr class="tot"><td>우리 회사 영업이익</td>
         <td class="${R.op < 0 ? 'v neg' : 'v pos'}">${money(R.op)}</td></tr></table>
     <div class="sep"></div>
-    <table><tr><td>모사가 우리에게 소재 팔아 번 돈</td><td>${money(R.hqMargin)}</td></tr>
-      <tr class="tot"><td>모법이익 <span class="muted" style="font-weight:600">모사 + 법인</span></td>
+    <table>
+      <tr><td>모사 이익 <span class="muted" style="font-weight:600">우리에게 소재 팔아 번 돈</span></td>
+        <td>${money(R.hqMargin)}</td></tr>
+      <tr><td>코일센터 이익 <span class="muted" style="font-weight:600">위 영업이익</span></td>
+        <td class="${R.op < 0 ? 'v neg' : ''}">${money(R.op)}</td></tr>
+      <tr class="tot"><td>모법이익 <span class="muted" style="font-weight:600">모사 이익 + 코일센터 이익</span></td>
         <td class="${R.consolidated < 0 ? 'v neg' : 'v pos'}">${money(R.consolidated)}</td></tr></table>
     ${R.lineReady ? `<div class="note good">${R.lineReady}</div>` : ''}
     ${G.W && G.W.fired.length ? `<div class="sep"></div><h2>돌아온 청구서</h2>${G.W.fired.map(f =>
@@ -1432,7 +1450,8 @@ function renderEnd() {
           <tr><td>누적 영업이익</td><td class="${m.op < 0 ? 'v neg' : 'v pos'}">${k(m.op)}</td></tr>
           <tr><td>톤당 평균 영업이익</td><td>$${m.margin.toFixed(1)}/t</td></tr>
           <tr><td>모사 소재 판매량</td><td>${fmt(m.hqTons)}t</td></tr>
-          <tr><td>모법이익 <span class="muted">모사 + 법인</span></td><td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${k(g.consol)}</td></tr>
+          <tr><td>모사 이익</td><td>${k(g.consol - m.op)}</td></tr>
+          <tr><td>모법이익 <span class="muted">모사 이익 + 코일센터 이익</span></td><td class="${g.consol < 0 ? 'v neg' : 'v pos'}">${k(g.consol)}</td></tr>
           <tr><td>본사 내시 수행률</td><td>${Math.round(g.fulfil * 100)}%</td></tr>
           ${hqRows}
           <tr><td>평균 가동률</td><td>${Math.round(m.util * 100)}%</td></tr>
