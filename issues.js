@@ -41,6 +41,8 @@ function worldIssues(s, W, G) {
   if ((W.quality < 70 || qualDrop(W) > 0.25) && since('w-qual') > 3) add(qualityCard(s, W), 50 + Math.max(0, 70 - W.quality) * 2);
   if ((W.fatigue > 50 || s.morale < 45) && since('w-people') > 4) add(peopleCard(s, W), 62);
   if (month === 6 && W.hq.target > 0 && W.hq.ytd < W.hq.target * 0.5 * 0.92) add(hqMidCard(s, W), 84);
+  // 지붕은 늘 거기 있었다. 전기료 고지서를 보고 나서야 생각이 난다.
+  if (!W.solar && s.turn > 5 && since('m-solar') > 9) add(solarCard(s, W), 66);
 
   /* ---------- 고객 ---------- */
   for (const k of shares) {
@@ -538,18 +540,18 @@ function maintCard(s, W) {
         + `기계가 말을 안 하이까네, 설 때 돼야 압니더.`,
     opts: [
       { label: '전면 정비 — 일주일 세운다', hint: '장기 생산성',
-        fx: ['−통장 $95,000', '−이번 달 캐파 12% 손실', '+설비 크게 회복', '+품질 개선'],
-        apply: (s, G) => { s.cash -= 95_000; W.capHit *= 0.88; W.equip = wClamp(W.equip + 32); W.qBoost += 5;
+        fx: ['−통장 $26,000', '−이번 달 캐파 12% 손실', '+설비 크게 회복', '+품질 개선'],
+        apply: (s, G) => { s.cash -= 26_000; W.capHit *= 0.88; W.equip = wClamp(W.equip + 32); W.qBoost += 5;
           W.deferMaint = 0; W.maintAge = 0; W.stats.maint++; styleAdd(W, 'craft', 2);
           remember(W, s, 'maint', '전면 정비');
-          lever(G, '전면 정비', { cash: -95_000, equip: 32, quality: 1, risk: '이번 달 매출 감소' });
+          lever(G, '전면 정비', { cash: -40_000, equip: 32, quality: 1, risk: '이번 달 매출 감소' });
           return '일주일 세아놓고 전부 뜯었심더. 구 공장장이 기름 묻은 손으로 "인자 됐습니더" 한마디 했습니다.'; } },
       { label: '주말에 부분 정비', hint: '급한 것만',
-        fx: ['−통장 $38,000', '=캐파 손실 거의 없음', '+설비 조금 회복'],
-        apply: (s, G) => { s.cash -= 38_000; W.equip = wClamp(W.equip + 12); W.maintAge = Math.max(0, W.maintAge - 4);
+        fx: ['−통장 $25,000', '=캐파 손실 거의 없음', '+설비 조금 회복'],
+        apply: (s, G) => { s.cash -= 25_000; W.equip = wClamp(W.equip + 12); W.maintAge = Math.max(0, W.maintAge - 4);
           W.fatigue = wClamp(W.fatigue + 4); styleAdd(W, 'craft');
           remember(W, s, 'maint-part', '부분 정비');
-          lever(G, '주말 부분 정비', { cash: -38_000, equip: 12 });
+          lever(G, '주말 부분 정비', { cash: -25_000, equip: 12 });
           return '주말에 특근 걸어가 급한 것만 손봤심더. 근본은 안 고쳤습니다.'; } },
       { label: '다음 달로 미룬다', hint: '지금은 물량이 먼저',
         fx: ['+이번 달 캐파 그대로', '?고장 위험 누적', '?품질 저하'],
@@ -577,17 +579,17 @@ function overloadCard(s, W, hot) {
           remember(W, s, 'overtime', '잔업으로 버티기');
           lever(G, '잔업·특근', { fatigue: 14, risk: '설비·품질 부담' });
           return '특근 돌립니더. 이번 달은 버팁니다. 다음 달은 모르겠고예.'; } },
-      { label: '외주 가공으로 넘긴다', hint: '남의 손을 빌린다', fx: ['−통장 $150,000', '+현장 숨 돌림', '?품질은 남의 손'],
-        apply: (s, G) => { s.cash -= 150_000; W.fatigue = wClamp(W.fatigue - 10); W.quality = wClamp(W.quality - 5);
+      { label: '외주 가공으로 넘긴다', hint: '남의 손을 빌린다', fx: ['−통장 $95,000', '+현장 숨 돌림', '?품질은 남의 손'],
+        apply: (s, G) => { s.cash -= 95_000; W.fatigue = wClamp(W.fatigue - 10); W.quality = wClamp(W.quality - 5);
           styleAdd(W, 'grow'); remember(W, s, 'outsource', '외주 가공');
-          lever(G, '외주 가공', { cash: -150_000, fatigue: -10, quality: -1 });
+          lever(G, '외주 가공', { cash: -95_000, fatigue: -10, quality: -1 });
           return '일부는 외주로 넘겼심더. 오 과장이 "책임은 우리가 집니다" 카면서 서류를 한참 들여다보데예.'; } },
-      { label: '한 조를 더 뽑는다', hint: '고정비가 늘고 캐파도 는다', fx: ['−고정비 월 $45,000', '+캐파 8% 영구 증가', '+피로 해소 · 사기 ↑'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 45_000; W.fatigue = wClamp(W.fatigue - 18);
+      { label: '한 조를 더 뽑는다', hint: '고정비가 늘고 캐파도 는다', fx: ['−고정비 월 $24,000', '+캐파 8% 영구 증가', '+피로 해소 · 사기 ↑'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 24_000; W.fatigue = wClamp(W.fatigue - 18);
           W.capBonus = (W.capBonus || 0) + 0.08; W.hires = (W.hires || 0) + 1;
           s.morale = wClamp(s.morale + 5); styleAdd(W, 'craft', 2);
           remember(W, s, 'hire', '인력 충원');
-          lever(G, '인력 충원', { fatigue: -18, risk: '캐파 +8% · 고정비 월 $45k 영구 증가' });
+          lever(G, '인력 충원', { fatigue: -18, risk: '캐파 +8% · 고정비 월 $24k 영구 증가' });
           return '한 조 더 뽑았심더. 현장이 숨을 쉽니더. 사람 값은 매달 나가는데, 그건 사장님이 아실 일이고예.'; } },
       { label: '물량을 줄인다', hint: '고객을 실망시킨다', fx: ['+현장 회복', '−판매량 ↓', '−큰 고객 관계 악화'],
         apply: (s, G) => { const k = topCust(s); const v = growCust(s, k, -0.15); W.rel[k] = wClamp(W.rel[k] - 7);
@@ -609,20 +611,20 @@ function idleCard(s, W) {
     text: '사장님예, 가동률이 반도 안 됩니더. 사람은 그대로 있고 고정비도 그대로 나가고예. '
         + '기계는 세아놓으면 더 상합니더. 놀리느니 뭐라도 하는 게 낫심더.',
     opts: [
-      { label: '이참에 대정비를 한다', hint: '놀 때 손본다', fx: ['−통장 $70,000', '+설비 크게 회복', '+품질'],
-        apply: (s, G) => { s.cash -= 70_000; W.equip = wClamp(W.equip + 28); W.maintAge = 0; W.deferMaint = 0; W.qBoost += 4;
+      { label: '이참에 대정비를 한다', hint: '놀 때 손본다', fx: ['−통장 $29,000', '+설비 크게 회복', '+품질'],
+        apply: (s, G) => { s.cash -= 29_000; W.equip = wClamp(W.equip + 28); W.maintAge = 0; W.deferMaint = 0; W.qBoost += 4;
           styleAdd(W, 'craft', 2); remember(W, s, 'maint', '비수기 대정비');
-          lever(G, '비수기 대정비', { cash: -70_000, equip: 28 });
+          lever(G, '비수기 대정비', { cash: -29_000, equip: 28 });
           return '바쁠 때는 죽어도 못 하는 걸 했심더. 이래 세아놓고 뜯어보기가 어렵습니더.'; } },
-      { label: '교대를 줄인다', hint: '고정비를 깎는다', fx: ['+고정비 월 $45,000 절감', '−사기 ↓', '?물량 오면 못 받음'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) - 45_000; s.morale = wClamp(s.morale - 8); styleAdd(W, 'cash', 2);
+      { label: '교대를 줄인다', hint: '고정비를 깎는다', fx: ['+고정비 월 $24,000 절감', '−사기 ↓', '?물량 오면 못 받음'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) - 24_000; s.morale = wClamp(s.morale - 8); styleAdd(W, 'cash', 2);
           remember(W, s, 'shift-cut', '교대 축소');
           lever(G, '교대 축소', { risk: '물량 회복 시 캐파 부족' });
           return '한 조를 쉬게 했심더. 현장 분위기가 영 안 좋습니더.'; } },
-      { label: '영업을 몰아친다', hint: '물량을 찾아온다', fx: ['−통장 $90,000', '+석 달 뒤 물량 ↑'],
-        apply: (s, G) => { s.cash -= 90_000; s.effortQueue.push({ amount: 90_000, turnsLeft: CFG.SALES_EFFORT_LAG });
+      { label: '영업을 몰아친다', hint: '물량을 찾아온다', fx: ['−통장 $58,000', '+석 달 뒤 물량 ↑'],
+        apply: (s, G) => { s.cash -= 58_000; s.effortQueue.push({ amount: 58_000, turnsLeft: CFG.SALES_EFFORT_LAG });
           styleAdd(W, 'grow'); remember(W, s, 'push', '영업 강화');
-          lever(G, '영업 강화', { cash: -90_000, risk: '효과는 석 달 뒤' });
+          lever(G, '영업 강화', { cash: -58_000, risk: '효과는 석 달 뒤' });
           return '정 부장이 신나가 나갔심더. 결과는 석 달 뒤에 봐야지예.'; } },
     ],
   };
@@ -641,10 +643,10 @@ function qualityCard(s, W) {
         + `${why ? `원인은 짚고 넘어가야 합니다. ${why} 이후부터입니다. ` : ''}`
         + `아직 고객은 모릅니다. 고객이 먼저 아는 순간 이건 품질 문제가 아니라 클레임입니다.`,
     opts: [
-      { label: '원인을 끝까지 판다', hint: '오 과장에게 맡긴다', fx: ['−통장 $85,000', '+품질 크게 개선 (두세 달)', '+클레임 위험 ↓'],
-        apply: (s, G) => { s.cash -= 85_000; W.qBoost += 14; G.ui.yieldSpend = 85_000; styleAdd(W, 'craft', 2);
+      { label: '원인을 끝까지 판다', hint: '오 과장에게 맡긴다', fx: ['−통장 $55,000', '+품질 크게 개선 (두세 달)', '+클레임 위험 ↓'],
+        apply: (s, G) => { s.cash -= 55_000; W.qBoost += 14; G.ui.yieldSpend = 55_000; styleAdd(W, 'craft', 2);
           remember(W, s, 'qual', '품질 원인 분석');
-          lever(G, '품질 원인 분석', { cash: -85_000, quality: 1 });
+          lever(G, '품질 원인 분석', { cash: -55_000, quality: 1 });
           return '6개월치 데이터를 전부 돌렸습니다. 원인은 나이프 교체 주기였습니다. 기준을 다시 썼습니다.'; } },
       { label: '출하 검사만 강화한다', hint: '밖으로 안 나가게', fx: ['−통장 $30,000', '+클레임 위험 조금 ↓', '=근본 원인은 그대로'],
         apply: (s, G) => { s.cash -= 30_000; W.qBoost += 5; styleAdd(W, 'craft');
@@ -668,15 +670,15 @@ function peopleCard(s, W) {
         + `${why ? `${why} 그 뒤로 쉬는 날이 하나도 없었대요. ` : ''}`
         + `그리고… 옆 공단에서 사람 빼간다는 얘기도 있어요. 한 분 나가면 그 조가 다 따라 나가요. 여기 그래요.`,
     opts: [
-      { label: '특별휴가와 보너스', hint: '한 번 숨을 돌린다', fx: ['−통장 $65,000', '−다음 달 캐파 5%', '+피로 ↓↓ · 사기 ↑'],
-        apply: (s, G) => { s.cash -= 65_000; W.capHit *= 0.95; W.fatigue = wClamp(W.fatigue - 25); s.morale = wClamp(s.morale + 10);
+      { label: '특별휴가와 보너스', hint: '한 번 숨을 돌린다', fx: ['−통장 $42,000', '−다음 달 캐파 5%', '+피로 ↓↓ · 사기 ↑'],
+        apply: (s, G) => { s.cash -= 42_000; W.capHit *= 0.95; W.fatigue = wClamp(W.fatigue - 25); s.morale = wClamp(s.morale + 10);
           styleAdd(W, 'craft', 2); remember(W, s, 'rest', '특별휴가');
-          lever(G, '특별휴가·보너스', { cash: -65_000, fatigue: -25 });
+          lever(G, '특별휴가·보너스', { cash: -42_000, fatigue: -25 });
           return '돌아가면서 사흘씩 쉬었어요. 어제 반장님이 저한테 웃으면서 인사했어요. 오랜만이에요.'; } },
-      { label: '임금을 올린다', hint: '확실히 잡는다', fx: ['−고정비 월 $20,000', '+사기 ↑↑', '?다른 조도 요구'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 20_000; s.morale = wClamp(s.morale + 12); styleAdd(W, 'craft');
+      { label: '임금을 올린다', hint: '확실히 잡는다', fx: ['−고정비 월 $11,000', '+사기 ↑↑', '?다른 조도 요구'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 11_000; s.morale = wClamp(s.morale + 12); styleAdd(W, 'craft');
           remember(W, s, 'raise', '임금 인상');
-          lever(G, '임금 인상', { risk: '고정비 월 $20k 영구 증가' });
+          lever(G, '임금 인상', { risk: '고정비 월 $11k 영구 증가' });
           return '올려드렸어요. 남기로 하셨어요. 근데 다른 조도 금방 알 거예요. 여기 소문 빨라요.'; } },
       { label: '조금만 더 버텨달라고 한다', hint: '돈을 안 쓴다', fx: ['+비용 없음', '?핵심 인력 이탈 → 캐파 손실'],
         apply: (s, G) => { styleAdd(W, 'grow');
@@ -820,10 +822,10 @@ function churnCard(s, W, k) {
         `경쟁사가 들어왔습니다. 확인은 못 했는데 제 감이 그렇습니다. 이 감은 잘 안 틀립니다. ` +
         `붙잡을지 놓을지 지금 정하셔야 합니다. 한 달 더 끌면 붙잡을 기회도 없습니다.`,
     opts: [
-      { label: '사장이 직접 찾아간다', hint: '사람으로 푼다', fx: ['−통장 $40,000', `+${CUST[k]} 관계 회복`],
-        apply: (s, G) => { s.cash -= 40_000; W.rel[k] = wClamp(W.rel[k] + 10); styleAdd(W, 'cust', 2);
+      { label: '사장이 직접 찾아간다', hint: '사람으로 푼다', fx: ['−통장 $26,000', `+${CUST[k]} 관계 회복`],
+        apply: (s, G) => { s.cash -= 26_000; W.rel[k] = wClamp(W.rel[k] + 10); styleAdd(W, 'cust', 2);
           remember(W, s, 'visit', `${CUST[k]} 사장 방문`, { cust: k });
-          lever(G, `${CUST[k]} 사장 직접 방문`, { cash: -40_000, rel: [[k, 10]] });
+          lever(G, `${CUST[k]} 사장 직접 방문`, { cash: -26_000, rel: [[k, 10]] });
           return `제가 직접 갔습니다. 구매 임원이 술 석 잔 들어가고 나서야 서운했던 걸 다 쏟아내더군요. 일단 잡았습니다. 이런 건 전화로는 안 됩니다.`; } },
       { label: '단가로 붙잡는다', hint: '확실하지만 비싸다',
         fx: [`−${CUST[k]} 단가 −$5/t (계속 유지)`, `+${CUST[k]} 관계 크게 회복`, '?다음에 또 깎아달라고 온다'],
@@ -874,9 +876,9 @@ function creditCard(s, W) {
         apply: (s, G) => { const v = growCust(s, k, 0.15); W.rel[k] = wClamp(W.rel[k] + 5); styleAdd(W, 'grow');
           const p = risky ? 0.4 : 0.1;
           G.pending.push({ turn: s.turn + 6, run: s2 => {
-            if (Math.random() < p) { s2.cash -= 1_600_000; W.rel[k] = wClamp(W.rel[k] - 10);
-              fire(W, s2, 'bad', `${CUST[k]}가 대금을 못 갚았습니다. $1,600k를 털었습니다.`, `여섯 달 전 ${CUST[k]} 여신 확대`);
-              return `${CUST[k]} 대금 $1,600k를 떼였습니다.`; }
+            if (Math.random() < p) { s2.cash -= 980_000; W.rel[k] = wClamp(W.rel[k] - 10);
+              fire(W, s2, 'bad', `${CUST[k]}가 대금을 못 갚았습니다. $980k를 털었습니다.`, `여섯 달 전 ${CUST[k]} 여신 확대`);
+              return `${CUST[k]} 대금 $980k를 떼였습니다.`; }
             return null; } });
           remember(W, s, 'credit', `${CUST[k]} 여신 확대`, { cust: k });
           lever(G, `${CUST[k]} 여신 확대`, { vol: v, rel: [[k, 5]], risk: '6개월 뒤 대손 가능성' });
@@ -903,23 +905,23 @@ function packCard(s, W) {
     id: 'm-pack', who: 'seo', topic: 'mat',
     title: '포장재 단가 인상 통보가 왔습니다',
     text: `저… 스틸 밴드랑 목재 스키드, 방청지 공급사에서 다음 달부터 ${up}% 올리겠다고 합니다. 원자재가 올랐대요. `
-        + `한 달에 $12k쯤 더 나가는 셈입니다. 다른 업체도 알아봤는데, 싼 데는 방청지가 좀 얇더라고요…`,
+        + `한 달에 $4k쯤 더 나가는 셈입니다. 다른 업체도 알아봤는데, 싼 데는 방청지가 좀 얇더라고요…`,
     opts: [
-      { label: '인상을 받아들인다', hint: '품질은 그대로', fx: ['−고정비 월 $12,000', '=포장 품질 유지'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 12_000; W.packCheap = false; styleAdd(W, 'craft');
-          lever(G, '포장재 인상 수용', { risk: '고정비 월 $12k 증가' });
+      { label: '인상을 받아들인다', hint: '품질은 그대로', fx: ['−고정비 월 $4,000', '=포장 품질 유지'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 4_000; W.packCheap = false; styleAdd(W, 'craft');
+          lever(G, '포장재 인상 수용', { risk: '고정비 월 $4k 증가' });
           return '받아들였습니다. 포장은 그대로입니다.'; } },
       { label: '싼 업체로 바꾼다', hint: '비용을 줄인다', fx: ['+고정비 월 $4,000 절감', '?운송 중 녹·흠집 → 클레임 위험 ↑'],
         apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) - 4_000; W.packCheap = true; styleAdd(W, 'cash');
           remember(W, s, 'pack-cheap', '포장재 저가 업체로 교체');
           lever(G, '포장재 저가 교체', { risk: '클레임 위험 상승' });
           return '싼 업체로 바꿨습니다. 서 대리가 "우기가 걱정이에요"라고 했습니다.'; } },
-      { label: '인상폭을 절반으로 협상한다', hint: '서 대리가 발로 뛴다', fx: ['−고정비 월 $6,000', '?협상이 안 될 수도'],
-        apply: (s, G) => { if (wChance(0.6)) { G.extraFixed = (G.extraFixed || 0) + 6_000; styleAdd(W, 'cash');
-            lever(G, '포장재 인상 협상 — 절반', { risk: '고정비 월 $6k 증가' });
+      { label: '인상폭을 절반으로 협상한다', hint: '서 대리가 발로 뛴다', fx: ['−고정비 월 $3,500', '?협상이 안 될 수도'],
+        apply: (s, G) => { if (wChance(0.6)) { G.extraFixed = (G.extraFixed || 0) + 3_500; styleAdd(W, 'cash');
+            lever(G, '포장재 인상 협상 — 절반', { risk: '고정비 월 $3.5k 증가' });
             return '서 대리가 사흘을 붙어서 절반으로 깎았습니다. 조용히 일 잘하는 사람입니다.'; }
-          G.extraFixed = (G.extraFixed || 0) + 12_000;
-          lever(G, '포장재 인상 협상 — 실패', { risk: '고정비 월 $12k 증가' });
+          G.extraFixed = (G.extraFixed || 0) + 4_000;
+          lever(G, '포장재 인상 협상 — 실패', { risk: '고정비 월 $4k 증가' });
           return '협상이 안 됐습니다. 결국 원래대로 올랐습니다.'; } },
     ],
   };
@@ -933,15 +935,15 @@ function sparesCard(s, W) {
         `사실 거의 없어요. 장부에는 있는 걸로 돼 있었는데 실사해 보니까 빈 박스였습니다. `
         + `${W.equip < 60 ? '구 공장장님 말로는 요즘 설비 소리가 안 좋대요. ' : ''}제가 걱정하는 건… 지금 서면 부품을 해외에서 받아야 하는데, 그게 열흘입니다. 열흘이요.`,
     opts: [
-      { label: '넉넉히 비축한다', hint: '돈이 창고에 묶인다', fx: ['−통장 $65,000', '+고장 나면 바로 교체 (캐파 손실 ↓)'],
-        apply: (s, G) => { s.cash -= 65_000; W.spares = true; styleAdd(W, 'craft', 2);
+      { label: '넉넉히 비축한다', hint: '돈이 창고에 묶인다', fx: ['−통장 $42,000', '+고장 나면 바로 교체 (캐파 손실 ↓)'],
+        apply: (s, G) => { s.cash -= 42_000; W.spares = true; styleAdd(W, 'craft', 2);
           remember(W, s, 'spares', 'MRO 예비품 비축');
-          lever(G, 'MRO 예비품 비축', { cash: -65_000 });
+          lever(G, 'MRO 예비품 비축', { cash: -42_000 });
           return '채워놨습니다. 구 공장장님이 창고에 와서 한참 보시더니 "잘했다" 하고 가셨어요. 저한테 그런 말 처음 하셨어요.'; } },
-      { label: '공급사 위탁재고 계약', hint: '쓴 만큼만 낸다', fx: ['−고정비 월 $7,000', '+고장 나면 바로 교체'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 7_000; W.spares = true; styleAdd(W, 'craft');
+      { label: '공급사 위탁재고 계약', hint: '쓴 만큼만 낸다', fx: ['−고정비 월 $4,000', '+고장 나면 바로 교체'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 4_000; W.spares = true; styleAdd(W, 'craft');
           remember(W, s, 'spares', 'MRO 위탁재고 계약');
-          lever(G, 'MRO 위탁재고 계약', { risk: '고정비 월 $7k 증가' });
+          lever(G, 'MRO 위탁재고 계약', { risk: '고정비 월 $4k 증가' });
           return '공급사가 우리 창고에 부품을 놓고 쓴 만큼만 청구하기로 했어요. 제가 세 군데 돌아다녔는데 한 군데가 해준다고… 다행입니다.'; } },
       { label: '필요할 때 주문한다', hint: '현금을 지킨다', fx: ['+비용 없음', '?고장 나면 부품 대기로 더 오래 선다'],
         apply: (s, G) => { W.spares = false; styleAdd(W, 'cash');
@@ -983,6 +985,48 @@ function rebateCard(s, W) {
   };
 }
 
+/* 공장 지붕 태양광 — 한 번 쓰고 매달 돌려받는 몇 안 되는 결정.
+   코일센터 지붕은 단일경간이라 넓고 평평해서 실제로 잘 깔린다.
+   전기는 슬리터·레벨러 모터와 조명·공조에 쓰이니 고정비에서 빠진다.
+   투자비는 한 번, 절감은 게임이 끝날 때까지다 — 남은 개월이 많을수록 남는 장사다. */
+function solarCard(s, W) {
+  const left = Math.max(1, CFG.TOTAL_TURNS - s.turn + 1);
+  const capex = 520_000, save = 9_000;            // 월 $9k 절감, 약 58개월이면 본전
+  const lease = 4_500;                            // 리스는 절반만 돌려받고 초기 투자는 없다
+  return {
+    id: 'm-solar', who: 'seo', topic: 'solar',
+    title: '공장 지붕에 태양광을 깔자는 제안이 왔습니다',
+    text: `저… 전기료 고지서를 정리하다가요. 지난 1년 전기료가 계속 오르고 있어요. `
+        + `그래서 알아봤는데, 우리 공장 지붕이 단일경간이라 평평하고 넓어서 태양광 깔기 좋다고 합니다. `
+        + `업체 견적으로는 설치비 $${fmt(capex / 1000)}k에 월 $${fmt(save / 1000)}k쯤 아낄 수 있대요. `
+        + `계산해보니 ${Math.round(capex / save)}개월이면 본전입니다. 지금 부임하신 지 ${s.turn}개월 차이고 `
+        + `남은 게 ${left}개월이라… 제가 이걸 말씀드려야 할지 한참 고민했습니다.`,
+    opts: [
+      { label: '설치한다', hint: '한 번 쓰고 매달 돌려받는다',
+        fx: [`−통장 $${fmt(capex / 1000)}k`, `+고정비 월 $${fmt(save / 1000)}k 영구 절감`,
+             `?남은 ${left}개월 동안 $${fmt(save * left / 1000)}k 절감`],
+        apply: (s, G) => { s.cash -= capex; G.extraFixed = (G.extraFixed || 0) - save; W.solar = 'own';
+          styleAdd(W, 'craft', 2); remember(W, s, 'solar', '지붕 태양광 설치');
+          lever(G, '지붕 태양광 설치', { cash: -capex, risk: `고정비 월 $${fmt(save / 1000)}k 영구 절감` });
+          return '설치했습니다! 석 달 걸렸고요, 지난달 전기료 고지서가 처음으로 줄었어요. '
+               + '제가 그거 보고 좀… 뿌듯했습니다.'; } },
+      { label: '지붕만 빌려주고 전기를 싸게 산다', hint: '돈은 안 쓰고 절반만 받는다',
+        fx: ['+초기 투자 없음', `+고정비 월 $${fmt(lease / 1000)}k 절감`, '−20년 계약에 묶인다'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) - lease; W.solar = 'lease';
+          styleAdd(W, 'cash'); remember(W, s, 'solar', '지붕 임대형 태양광');
+          lever(G, '지붕 임대형 태양광', { risk: `고정비 월 $${fmt(lease / 1000)}k 절감 · 20년 계약` });
+          return '지붕만 빌려주고 전기를 싸게 사는 쪽으로 했습니다. 돈은 안 들었는데요… '
+               + '계약서가 20년짜리라 그게 좀 걸립니다. 증축하실 때 그 지붕은 못 씁니다.'; } },
+      { label: '지금은 아니다', hint: '현금이 먼저다',
+        fx: ['+현금 지킴', '−전기료는 계속 오른다'],
+        apply: (s, G) => { styleAdd(W, 'cash');
+          lever(G, '태양광 보류', { risk: '전기료 부담 지속' });
+          return '네, 알겠습니다. 견적서는 파일로 넣어두겠습니다. '
+               + '혹시 나중에 생각나시면 말씀해 주세요.'; } },
+    ],
+  };
+}
+
 function safetyCard(s, W) {
   return {
     id: 'm-safety', who: 'seo', topic: 'mat',
@@ -991,10 +1035,10 @@ function safetyCard(s, W) {
         `안전화랑 방진 장갑도 다 해졌습니다. 어제 야드에서 와이어를 봤는데 소선이 몇 가닥 나와 있었어요. `
         + `${W.fatigue > 35 ? '요즘 특근이 많아서 현장이 더 험하게 쓰고 있습니다. ' : ''}금액이 큰 것도 아닌데 매번 뒤로 밀려서… 제가 말씀을 잘 못 드린 것 같습니다.`,
     opts: [
-      { label: '전부 교체한다', hint: '사고를 막는다', fx: ['−통장 $45,000', '+사고 위험 ↓', '+직원 사기 ↑'],
-        apply: (s, G) => { s.cash -= 45_000; W.safety = 0; s.morale = wClamp(s.morale + 3); styleAdd(W, 'craft');
+      { label: '전부 교체한다', hint: '사고를 막는다', fx: ['−통장 $29,000', '+사고 위험 ↓', '+직원 사기 ↑'],
+        apply: (s, G) => { s.cash -= 29_000; W.safety = 0; s.morale = wClamp(s.morale + 3); styleAdd(W, 'craft');
           remember(W, s, 'safety', '안전 설비 교체');
-          lever(G, '크레인 와이어·보호구 교체', { cash: -45_000 });
+          lever(G, '크레인 와이어·보호구 교체', { cash: -29_000 });
           return '전부 새것으로 바꿨습니다. 현장 반장님들이 고맙다고 하셨어요. 저는 한 것도 없는데…'; } },
       { label: '와이어만 교체한다', hint: '큰 것만', fx: ['−통장 $25,000', '=사고 위험 조금 ↓'],
         apply: (s, G) => { s.cash -= 25_000; W.safety = Math.max(0, (W.safety || 0) - 1);
@@ -1028,14 +1072,14 @@ function wageCard(s, W) {
         + `옆 공단 두 곳은 벌써 ${infl + 2}%를 줬습니다. 그쪽 인사팀장하고 통화해봤습니다. `
         + `참고로 이건 한 번 올리면 매달 고정비로 영원히 나갑니다. 성과급처럼 올해만 안 주고 넘어가는 게 아닙니다.`,
     opts: [
-      { label: `${infl + 4}% 요구대로`, hint: '사람을 잡는다', fx: ['−고정비 월 $40,000', '+직원 사기 ↑↑', '+이직 위험 ↓'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 40_000; s.morale = wClamp(s.morale + 10); styleAdd(W, 'craft');
+      { label: `${infl + 4}% 요구대로`, hint: '사람을 잡는다', fx: ['−고정비 월 $21,000', '+직원 사기 ↑↑', '+이직 위험 ↓'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 21_000; s.morale = wClamp(s.morale + 10); styleAdd(W, 'craft');
           remember(W, s, 'wage-high', '임금 요구 수용');
-          lever(G, `임금 ${infl + 4}% 인상`, { risk: '고정비 월 $40k 증가' });
+          lever(G, `임금 ${infl + 4}% 인상`, { risk: '고정비 월 $21k 증가' });
           return '요구대로 올렸습니다. 조회 분위기는 밝습니다. 내년 이맘때 또 같은 자리에 앉는다는 것만 기억해두시죠.'; } },
-      { label: `물가만큼 ${infl}%`, hint: '절충', fx: ['−고정비 월 $26,000', '=직원 사기 조금 ↑'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 26_000; s.morale = wClamp(s.morale + 2);
-          lever(G, `임금 ${infl}% 인상`, { risk: '고정비 월 $26k 증가' });
+      { label: `물가만큼 ${infl}%`, hint: '절충', fx: ['−고정비 월 $14,000', '=직원 사기 조금 ↑'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 14_000; s.morale = wClamp(s.morale + 2);
+          lever(G, `임금 ${infl}% 인상`, { risk: '고정비 월 $14k 증가' });
           return '물가만큼 올렸습니다. 직원대표가 "섭섭하다"고 했는데, 섭섭한 정도면 성공한 협상입니다.'; } },
       { label: '올해는 동결', hint: '고정비를 지킨다', fx: ['+고정비 그대로', '−직원 사기 ↓↓', '?반장급 이직 위험'],
         apply: (s, G) => { s.morale = wClamp(s.morale - 12); styleAdd(W, 'cash', 2);
@@ -1061,7 +1105,7 @@ function bonusCard(s, W) {
           lever(G, '연말 성과급', { cash: -pool });
           return '나눴습니다. 린 매니저 말로는 현장 반응이 좋다는데, 저는 통장 잔고를 보고 있었습니다.'; } },
       { label: '기본만', hint: '작년 수준', fx: ['−통장 $60,000', '=사기 그대로'],
-        apply: (s, G) => { s.cash -= 60_000;
+        apply: (s, G) => { s.cash -= 39_000;
           lever(G, '연말 성과급 기본', { cash: -60_000 });
           return '작년만큼 줬습니다. 늘지도 줄지도 않았으니 고맙다는 말도 없습니다. 그게 기본급의 운명입니다.'; } },
       { label: '올해는 없다', hint: '현금을 지킨다', fx: ['+현금 지킴', '−직원 사기 ↓↓'],
@@ -1089,15 +1133,15 @@ function laborCard(s, W) {
           return '교대를 바꾸고 특근을 줄였습니다. 감독관이 "잘 정리돼 있네요" 하고 삼십 분 만에 갔습니다. 그 삼십 분이  k짜리였습니다.'; } },
       { label: '서류만 정비한다', hint: '최소한만', fx: ['−통장 $15,000', '?현장이 지쳐 있으면 적발'],
         apply: (s, G) => { s.cash -= 15_000;
-          if (W.fatigue > 40 && wChance(0.55)) { s.cash -= 150_000; s.trust = wClamp(s.trust - 3);
-            lever(G, '근로감독 — 적발', { cash: -165_000, trust: -3 });
-            return '출퇴근 기록과 서류가 안 맞았습니다. 과태료 $150k에 시정명령이 나왔습니다.'; }
+          if (W.fatigue > 40 && wChance(0.55)) { s.cash -= 95_000; s.trust = wClamp(s.trust - 3);
+            lever(G, '근로감독 — 적발', { cash: -110_000, trust: -3 });
+            return '출퇴근 기록과 서류가 안 맞았습니다. 과태료 $95k에 시정명령이 나왔습니다.'; }
           lever(G, '근로감독 — 통과', { cash: -15_000 });
           return '서류로 넘어갔습니다. 이번엔 운이 좋았다고 말씀드리는 게 정확하겠습니다.'; } },
       { label: '그대로 받는다', hint: '돈을 안 쓴다', fx: ['?적발 가능성 높음'],
-        apply: (s, G) => { if (wChance(0.65)) { s.cash -= 220_000; s.morale = wClamp(s.morale - 5); s.trust = wClamp(s.trust - 4);
-            lever(G, '근로감독 — 적발', { cash: -220_000, trust: -4 });
-            return '적발됐습니다. 과태료 $220k. 본사 인사팀에서도 연락이 왔습니다.'; }
+        apply: (s, G) => { if (wChance(0.65)) { s.cash -= 140_000; s.morale = wClamp(s.morale - 5); s.trust = wClamp(s.trust - 4);
+            lever(G, '근로감독 — 적발', { cash: -140_000, trust: -4 });
+            return '적발됐습니다. 과태료 $140k. 본사 인사팀에서도 연락이 왔습니다.'; }
           lever(G, '근로감독 — 통과', {});
           return '안 걸렸습니다. 대비를 잘해서가 아니라 운이 좋아서입니다. 그 차이는 다음 감독 때 드러납니다.'; } },
     ],
@@ -1111,9 +1155,9 @@ function housingCard(s, W) {
     text: `주재원 사택 세 채 갱신인데 집주인이 30% 올리겠답니다. 근거는 "이 동네 외국인이 늘었다"입니다. 늘어난 외국인이 저희인데, 저희가 온 값을 저희가 내는 구조입니다. `
         + `참고로 사장님 사택도 그 세 채에 들어갑니다.`,
     opts: [
-      { label: '갱신한다', hint: '주재원 가족이 편하다', fx: ['−고정비 월 $6,000'],
-        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 6_000;
-          lever(G, '사택 갱신', { risk: '고정비 월 $6k 증가' });
+      { label: '갱신한다', hint: '주재원 가족이 편하다', fx: ['−고정비 월 $3,500'],
+        apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 3_500;
+          lever(G, '사택 갱신', { risk: '고정비 월 $3.5k 증가' });
           return '갱신했습니다. 매달 \k씩, 계약 기간 내내 조용히 나갑니다. 제일 안 아픈 지출이 제일 오래 갑니다.'; } },
       { label: '공단 근처 싼 곳으로 옮긴다', hint: '비용을 줄인다', fx: ['−이사비 $25,000', '−주재원 불만'],
         apply: (s, G) => { s.cash -= 25_000; s.morale = wClamp(s.morale - 3); styleAdd(W, 'cash');
@@ -1134,18 +1178,18 @@ function insureCard(s, W) {
     text: `화재·재고·기계 보험 갱신인데 20% 올랐습니다. 작년에 이 지역 공장이 몇 군데 탔다는군요. 저희가 안 탔는데 저희 보험료가 오릅니다. 보험이란 게 원래 그렇습니다. `
         + `보장을 줄이면 싸집니다. 대신 사고가 나면 그 차액을 한 번에 내시게 됩니다.`,
     opts: [
-      { label: '보장 그대로 갱신', hint: '안전', fx: ['−통장 $85,000'],
-        apply: (s, G) => { s.cash -= 85_000; W.insLow = false;
-          lever(G, '보험 갱신', { cash: -85_000 });
+      { label: '보장 그대로 갱신', hint: '안전', fx: ['−통장 $55,000'],
+        apply: (s, G) => { s.cash -= 55_000; W.insLow = false;
+          lever(G, '보험 갱신', { cash: -55_000 });
           return '그대로 갱신했습니다. 올해 아무 일도 안 일어나면 \k를 버린 셈이 되는데, 그게 제일 좋은 결말입니다.'; } },
-      { label: '기계 보험을 뺀다', hint: '재고·화재만', fx: ['−통장 $50,000', '?설비 고장 수리비 전액 부담'],
-        apply: (s, G) => { s.cash -= 50_000; W.insLow = true; styleAdd(W, 'cash');
+      { label: '기계 보험을 뺀다', hint: '재고·화재만', fx: ['−통장 $32,000', '?설비 고장 수리비 전액 부담'],
+        apply: (s, G) => { s.cash -= 32_000; W.insLow = true; styleAdd(W, 'cash');
           remember(W, s, 'ins-low', '기계 보험 제외');
-          lever(G, '기계 보험 제외', { cash: -50_000, risk: '고장 수리비 증가' });
+          lever(G, '기계 보험 제외', { cash: -32_000, risk: '고장 수리비 증가' });
           return '기계 보험을 뺐습니다. \k 아꼈습니다. 감속기 하나가 \k인 건 알고 계시죠.'; } },
-      { label: '자기부담금을 올린다', hint: '큰 사고만 대비', fx: ['−통장 $62,000', '=작은 사고는 우리 부담'],
-        apply: (s, G) => { s.cash -= 62_000;
-          lever(G, '보험 자기부담 상향', { cash: -62_000 });
+      { label: '자기부담금을 올린다', hint: '큰 사고만 대비', fx: ['−통장 $26,000', '=작은 사고는 우리 부담'],
+        apply: (s, G) => { s.cash -= 40_000;
+          lever(G, '보험 자기부담 상향', { cash: -40_000 });
           return '자기부담금을 올렸습니다. 작은 사고는 우리가 내고 큰 사고만 보험이 냅니다. 작은 사고가 자주 나면 계산이 틀립니다.'; } },
     ],
   };
@@ -1158,19 +1202,19 @@ function taxCard(s, W) {
     text: `현지 국세청이 나옵니다. 쟁점은 이전가격입니다. `
         + `쉽게 말해 "본사한테 비싸게 사서 여기 이익을 줄인 것 아니냐"입니다. 저희가 실제로 적자인 게 증거가 될지 변명이 될지는 대응하기 나름입니다.`,
     opts: [
-      { label: '외부 세무법인을 쓴다', hint: '돈으로 막는다', fx: ['−세무법인 $120,000', '+추징 약 $50,000로 최소화'],
-        apply: (s, G) => { s.cash -= 170_000;
-          lever(G, '세무조사 — 외부 대응', { cash: -170_000 });
+      { label: '외부 세무법인을 쓴다', hint: '돈으로 막는다', fx: ['−세무법인 $110,000', '+추징까지 합쳐 $110,000로 최소화'],
+        apply: (s, G) => { s.cash -= 110_000;
+          lever(G, '세무조사 — 외부 대응', { cash: -110_000 });
           return '세무법인이 보고서를 냈고 추징은 \k로 끝났습니다. 수수료가 \k니까 아낀 게 맞는지는 각자 판단입니다. 저는 맞다고 봅니다.'; } },
       { label: '우리끼리 대응한다', hint: '한 부장이 밤을 샌다', fx: ['?추징이 클 수 있다'],
-        apply: (s, G) => { if (wChance(0.5)) { s.cash -= 600_000;
-            lever(G, '세무조사 — 자체 대응 실패', { cash: -600_000 });
+        apply: (s, G) => { if (wChance(0.5)) { s.cash -= 380_000;
+            lever(G, '세무조사 — 자체 대응 실패', { cash: -380_000 });
             return '논리가 부족했습니다. 추징 \k. 제가 밤을 샌 값이 시간당 마이너스로 찍혔습니다.'; }
-          s.cash -= 40_000; lever(G, '세무조사 — 자체 대응 성공', { cash: -40_000 });
+          s.cash -= 26_000; lever(G, '세무조사 — 자체 대응 성공', { cash: -26_000 });
           return '자료를 전부 맞춰냈습니다. 추징 \k. 이런 건 두 번은 못 합니다.'; } },
       { label: '본사 세무팀 지원을 요청한다', hint: '본사에 빚을 진다', fx: ['−본사 신뢰 3', '+추징 적음'],
-        apply: (s, G) => { s.trust = wClamp(s.trust - 3); s.cash -= 150_000;
-          lever(G, '세무조사 — 본사 지원', { cash: -150_000, trust: -3 });
+        apply: (s, G) => { s.trust = wClamp(s.trust - 3); s.cash -= 95_000;
+          lever(G, '세무조사 — 본사 지원', { cash: -95_000, trust: -3 });
           return '본사 세무팀이 붙어서 추징 \k로 막았습니다. 대신 "법인이 준비가 안 돼 있다"는 문장이 본사 보고서에 들어갔습니다. 그 문장은 오래 남습니다.'; } },
     ],
   };
@@ -1185,9 +1229,9 @@ function vacancyCard(s, W) {
         `사람이 나갈 때 붙잡히는 건 마음이 아직 남아 있을 때뿐입니다. 이미 다음 직장 명함이 있었습니다. ` +
         `그 조가 흔들립니다. 반장 자리는 비워두면 비용이 안 드는 것처럼 보이는데, 그게 제일 비쌉니다.`,
     opts: [
-      { label: '헤드헌터로 경력자를 뽑는다', hint: '빨리, 제대로', fx: ['−통장 $40,000', '+품질 회복', '+조 안정'],
-        apply: (s, G) => { s.cash -= 40_000; W.qBoost += 5; W.fatigue = wClamp(W.fatigue - 6); styleAdd(W, 'craft');
-          lever(G, '반장 경력 채용', { cash: -40_000, quality: 1 });
+      { label: '헤드헌터로 경력자를 뽑는다', hint: '빨리, 제대로', fx: ['−통장 $26,000', '+품질 회복', '+조 안정'],
+        apply: (s, G) => { s.cash -= 26_000; W.qBoost += 5; W.fatigue = wClamp(W.fatigue - 6); styleAdd(W, 'craft');
+          lever(G, '반장 경력 채용', { cash: -26_000, quality: 1 });
           return '경쟁사 출신을 데려왔습니다. \k 들었고, 그쪽 공정도 같이 들어왔습니다. 그 값은 따로 안 냈습니다.'; } },
       { label: '내부에서 승진시킨다', hint: '사람을 키운다', fx: ['+직원 사기 ↑', '=품질 잠시 흔들림'],
         apply: (s, G) => { s.morale = wClamp(s.morale + 5); W.quality = wClamp(W.quality - 2); styleAdd(W, 'craft');

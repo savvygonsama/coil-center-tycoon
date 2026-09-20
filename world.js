@@ -49,8 +49,8 @@ function initWorld(s, diff) {
     /* 고객별로 깎아준 단가 ($/t). 계약이 살아 있는 한 남는다.
        전임 사장이 물량을 지키려고 조금씩 내준 게 남아 있다. 가공마진이 톤당 $40인
        장사라 이 몇 달러가 그대로 영업이익이다. 매년 1월 단가 재협상에서 절반으로 준다. */
-    cut:     hard ? { JP: 7, EU: 7, CN: 3, PART: 5, HOME: 4 }
-                  : { JP: 5, EU: 4, CN: 2, PART: 3, HOME: 2 },
+    cut:     hard ? { JP: 5, EU: 5, CN: 2, PART: 4, HOME: 3 }
+                  : { JP: 3, EU: 2, CN: 1, PART: 2, HOME: 1 },
     concede: { JP: 1, EU: 1, CN: 0, PART: 1, HOME: 0 },   // 양보한 횟수. 한 번 깎아주면 또 온다
     relHigh: { JP: 0, EU: 0, CN: 0, PART: 0, HOME: 0 },
     threat: {},                   // 이번 달 경쟁사가 실제로 들어간 고객 (숨김)

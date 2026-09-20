@@ -298,7 +298,18 @@
   .metrics td.dn{color:var(--rust);font-weight:800}
   .metrics td.up.inv{color:var(--rust)} .metrics td.dn.inv{color:var(--teal)}
   .metrics tr.sub td:first-child{padding-left:20px;color:var(--dim)}
-  .metrics tr.head th{text-align:left;padding-top:14px;color:var(--ink);font-size:14px;font-weight:800}
+  /* 카테고리 머리줄 — 판매 실적 / 손익 / 재고·재원 / 순운전자본 / 차입이 눈에 갈리게
+     띠를 깔아준다. 줄이 스무 개 넘어가면 어디서 어디까지가 한 덩어리인지 안 보인다. */
+  .metrics tr.head th{text-align:left;color:#fff;font-size:13px;font-weight:800;
+    background:var(--blue);padding:7px 8px;letter-spacing:-.01em;
+    border-top:2px solid var(--ink);border-bottom:2px solid var(--ink)}
+  .metrics tr.head th:nth-child(n+2){text-align:right;color:rgba(255,255,255,.75);font-weight:700}
+  .metrics tr.head.c-sale th{background:var(--blue)}
+  .metrics tr.head.c-pl   th{background:var(--teal)}
+  .metrics tr.head.c-stock th{background:var(--ochre);color:var(--ink)}
+  .metrics tr.head.c-stock th:nth-child(n+2){color:rgba(20,40,60,.7)}
+  .metrics tr.head.c-wc   th{background:var(--rust)}
+  .metrics tr.head.c-debt th{background:var(--ink)}
   .custbar{display:grid;grid-template-columns:168px 1fr 54px;gap:10px;align-items:center;
     font-size:15px;margin:7px 0;font-weight:700}
   .custbar .track{height:18px}
@@ -440,9 +451,13 @@
   .crew-plate b{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:15px}
   .optlist button b{font-family:var(--px);font-weight:400;letter-spacing:0;font-size:17px}
   .halltag,.hallfoot,.lbot .sub,.pstat b{font-family:var(--px);font-weight:400;letter-spacing:0}
-  table{font-family:var(--sans)}
+  /* 표는 한 글꼴로만 쓴다.
+     합계 줄과 증감 칸만 픽셀 폰트로 바꿔놨더니 같은 표 안에서 글씨가 두 종류로 보여
+     숫자를 눈으로 따라가기가 어려웠다. 강조는 글꼴이 아니라 굵기와 색으로 한다.
+     숫자는 tabular-nums로 자릿수를 맞춰 세로로 읽히게 한다. */
+  table{font-family:var(--sans);font-variant-numeric:tabular-nums}
   td,th{letter-spacing:0}
-  tr.tot td,.metrics td.up,.metrics td.dn{font-family:var(--px);font-weight:400}
+  tr.tot td{font-weight:800}
 
   /* 픽셀 폰트는 글자 위아래 여백이 넉넉해서 줄간격을 조금 줄여야 맞는다 */
   h1,h2,.vchoice,.modecard b,.big{line-height:1.4}
@@ -492,11 +507,15 @@
   .k-est{background:var(--ochre-l);color:#8a6410}
   .k-rum{background:var(--rust-l);color:var(--rust)}
 
-  .custbar{grid-template-columns:150px 1fr 48px 116px}
-  .custbar .rel{font-family:var(--px);font-size:12px;padding:0 6px;border:1.5px solid var(--ink);text-align:center;white-space:nowrap}
+  .custbar{grid-template-columns:150px 1fr 48px 84px 168px}
+  .custbar .rel{font-size:12px;padding:1px 6px;border:1.5px solid var(--ink);text-align:center;
+    white-space:nowrap;font-weight:800}
+  .custbar .leak{font-size:12.5px;color:var(--dim);white-space:nowrap;font-weight:700;
+    font-variant-numeric:tabular-nums}
   .rel.up{background:var(--teal-l);color:var(--teal)} .rel.neu{background:var(--panel2);color:var(--dim)}
   .rel.dn{background:var(--rust-l);color:var(--rust)}
-  @media(max-width:560px){ .custbar{grid-template-columns:96px 1fr 38px 84px;font-size:12.5px} }
+  @media(max-width:760px){ .custbar{grid-template-columns:120px 1fr 40px 72px;font-size:13px}
+    .custbar .leak{grid-column:1 / -1;text-align:right;margin-top:-4px} }
 
   .profile{max-width:620px;margin:16px auto 0;text-align:left}
   .profile p{font-size:16.5px;line-height:1.75;margin:0 0 10px}

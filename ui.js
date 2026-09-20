@@ -162,23 +162,31 @@ function dealTurn() {
   const big = G.bigPlan && G.bigPlan[s.turn];
   if (big) put({ ...big, topic: 'big' });
 
-  // 2. 회사가 만든 안건 — 반드시 올라올 것부터, 그다음 급한 순서
+  /* 2. 회사가 만든 안건 — 반드시 올라올 것부터, 그다음 급한 순서.
+     속성은 한 번 결재로 석 달을 돌리니 그 석 달치 안건이 같이 올라와야 한다.
+     매달 결재와 같은 수만 올리면 분기 모드는 결정 횟수가 3분의 1로 줄어든다.
+     그건 빠른 게 아니라 게임을 덜 하는 것이다. */
+  const cap = G.mpt > 1 ? 7 : 4;
+  const soft = G.mpt > 1 ? 5 : 3;
   const cand = worldIssues(s, W, G).sort((a, b) => (b.force - a.force) || (b.prio - a.prio));
   for (const c of cand) {
-    if (G.queue.length >= 4) break;
-    if (!c.force && G.queue.length >= 3 && c.prio < 70) break;
+    if (G.queue.length >= cap) break;
+    if (!c.force && G.queue.length >= soft && c.prio < 70) break;
     put(c.card);
   }
 
-  // 3. 사내 이야기 — 가끔. 숫자로 안 잡히는 일도 회사다.
-  if (G.queue.length < 4 && wChance(0.28)) {
+  // 3. 사내 이야기 — 가끔. 숫자로 안 잡히는 일도 회사다. 분기 결재는 석 달치라 더 자주 온다.
+  const lifeN = G.mpt > 1 ? 2 : 1;
+  for (let i = 0; i < lifeN; i++) {
+    if (G.queue.length >= cap) break;
+    if (!wChance(G.mpt > 1 ? 0.5 : 0.28)) continue;
     const pool = DECK.life.filter(c => (!c.when || c.when(s, cardCtx(s))) && (s.turn - (G.seen[c.id] ?? -99)) > 12);
     if (pool.length) put(wPick(pool));
   }
 
-  // 4. 너무 조용하면 기회를 하나 올린다
-  if (G.queue.length < 2) put(custFocusCard(s, W));
-  if (!G.queue.length) put(policyCard(s, W, coverOf(s)));
+  // 4. 너무 조용하면 기회를 올린다
+  if (G.queue.length < (G.mpt > 1 ? 4 : 2)) put(custFocusCard(s, W));
+  if (G.queue.length < (G.mpt > 1 ? 3 : 1)) put(policyCard(s, W, coverOf(s)));
 
   /* 5. 소재 발주는 매달 마지막에 올린다. 이 회사에서 사장이 매달 반드시 하는 유일한 일이다.
      다른 안건을 다 보고 나서 — 고장이 났는지, 고객이 물량을 더 준다는지 알고 나서 — 숫자를 적어야 하니까. */
@@ -383,7 +391,7 @@ function cardCtx(s) {
   return { load, tight: load > 0.97, idle: load < 0.55, pmTrend };
 }
 
-const DECK_LABEL = { mat: '자재', hr: '인사', ga: '총무', buy: '소재 발주', policy: '소재 발주 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', order: '소재 발주', op: '운영', life: '사내', big: '주요 사건' };
+const DECK_LABEL = { mat: '자재', hr: '인사', ga: '총무', buy: '소재 발주', policy: '소재 발주 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', solar: '설비 투자', order: '소재 발주', op: '운영', life: '사내', big: '주요 사건' };
 
 /* 매달 영업 인력을 어느 고객군에 붙일지. 결실은 석 달 뒤. */
 function customerCard(s) {
@@ -436,7 +444,11 @@ function orderRows(s, L) {
     /* 본사 압연 스케줄에 밀어 넣을 수 있는 양은 한계가 있다.
        재고가 바닥나도 한 달에 소요량의 1.6배까지만 걸린다 — 그래서 결품은
        한 번 나면 한 달 만에 못 메운다. 그게 발주를 미루면 안 되는 이유다. */
-    const MAX = use * 1.6;
+    /* 본사 압연 스케줄에 한 번에 밀어 넣을 수 있는 양의 한계.
+       "그 기간에 쓸 양 + 0.6개월치 따라잡기"로 잡는다. 매달 결재면 1.6개월치,
+       분기 결재면 3.6개월치다. 분기라고 1.6배를 그대로 곱하면 한 번에 넉 달 반이
+       들어와 재고가 톱니처럼 튄다. */
+    const MAX = (use / mo) * (mo + 0.6);
     /* 권장량 = 이번 기간에 쓸 양 + (목표 재원 − 지금 재원).
        앞의 항이 소비를 메우고, 뒤의 항이 재원을 목표로 되돌린다.
        뒤의 항을 빼먹으면 재원이 한번 어긋난 채로 계속 간다.
@@ -446,7 +458,11 @@ function orderRows(s, L) {
        다음 결재 직전이 바닥이다. 목표를 꼭대기에 맞추면 평균 재고가 매달 결재할 때보다
        반 분기만큼 높아진다. 그래서 목표를 그만큼 내려 평균을 같은 자리에 둔다. */
     const aim = lead + cover - (mo - 1) / 2;
-    const rec = Math.min(MAX, Math.max(0, use + useM * aim - res));
+    /* 천장 — 이만큼 걸고 나면 재원이 여기를 넘는다. 넘기면 그때부터는 창고와 이자다.
+       권장량이 천장을 넘지 않게 잘라둔다. 분기 결재에서 한 번 넘치면
+       다음 분기 권장이 0이 되고 그다음에 또 몰리는 톱니가 생긴다. */
+    const ceiling = useM * (lead + cover + mo);
+    const rec = Math.min(MAX, Math.max(0, ceiling - res), Math.max(0, use + useM * aim - res));
     return { k, sh, use, oh, sea: se, prod: pr, inv, res, max: Math.round(MAX / 50) * 50,
       invM: useM > 0 ? inv / useM : 0, resM: useM > 0 ? res / useM : 0,
       rec: Math.round(rec / 50) * 50 };
@@ -520,8 +536,14 @@ function buildDecision(s, ui) {
   /* 사장이 고객군별로 직접 정한 발주가 있으면 그걸 쓴다.
      없으면(전임 사장의 프렐류드, 속성 모드의 2·3번째 달) 방침대로 자동으로 건다. */
   const gap = L.need * (CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd + ui.cover) - L.haveP;
-  const auto = Math.max(0, Math.min(gap, L.need * 1.6)) * (G ? (G.mult || 1) : 1);
-  const buy = ui.orderTon != null ? ui.orderTon * (G ? (G.mult || 1) : 1) : auto;
+  const auto = Math.max(0, Math.min(gap, L.need * 1.6));
+  /* 카드가 거는 발주 배수(G.mult)는 "한 달치를 얼마나 더/덜 살까"로 쓰인 값이다.
+     분기 결재에서 석 달치에 그대로 곱하면 한 장의 카드가 한 분기를 통째로 흔든다.
+     그래서 결재 주기만큼 나눠서 먹인다 — 1.7배 카드가 분기에선 1.23배가 된다. */
+  const raw = G ? (G.mult || 1) : 1;
+  const mo = G ? (G.mpt || 1) : 1;
+  const mult = 1 + (raw - 1) / mo;
+  const buy = ui.orderTon != null ? ui.orderTon * mult : auto * raw;
   const n = L.now, hasCommon = (s.hqSpotCredit || 0) > 1;
   /* 가공 제품은 열흘치쯤 들고 있어야 한다. 고객 라인은 JIT로 도는데 우리 라인이 매일 그 순서대로
      돌 수는 없다. 그래서 이번 달 내시에 목표 제품재고와의 차이를 더해서 돌린다. */
@@ -1107,10 +1129,10 @@ function perfPanel(s) {
 
   // 줄 정의 — kind: flow(기간 합) · ratio(비율) · bal(월말 잔액)
   const rows = [];
-  const sec = title => rows.push({ head: title });
+  const sec = (title, cls) => rows.push({ head: title, cls: cls || 'c-sale' });
   const row = (label, kind, fn, f, o = {}) => rows.push({ label, kind, fn, f, ...o });
 
-  sec('판매 실적');
+  sec('판매 실적', 'c-sale');
   row('판매량', 'flow', r => T(r), tt, { cls: 'tot' });
   row('통코일', 'flow', r => (r.shipped || {}).C2C || 0, tt, { cls: 'sub' });
   row('가공 · 슬리팅', 'flow', r => (r.shipped || {}).SLIT || 0, tt, { cls: 'sub' });
@@ -1119,24 +1141,24 @@ function perfPanel(s) {
     row('가공 · 블랭킹', 'flow', r => ((r.shipped || {}).TRAP || 0) + ((r.shipped || {}).DIE || 0), tt, { cls: 'sub' });
   row('가공 판매 비중', 'ratio', r => { const t = T(r); return t > 0 ? 1 - ((r.shipped || {}).C2C || 0) / t : null; }, pc);
 
-  sec('고객군별 판매');
+  sec('고객군별 판매', 'c-sale');
   for (const k of Object.keys(CUST)) {
     row(`${CUST[k]} · ${CFG.CUSTOMERS[k].name}`, 'flow', r => custTonsOf(r)[k] || 0,
       v => tt(v), { cls: 'sub', share: r => { const t = T(r); return t > 0 ? (custTonsOf(r)[k] || 0) / t : 0; } });
   }
 
-  sec('손익 (천달러)');
+  sec('손익 (천달러)', 'c-pl');
   row('매출액', 'flow', r => r.revenue, K);
   row('영업이익', 'flow', r => r.op, K, { cls: 'tot' });
   row('순이익', 'flow', r => r.np, K);
   row('톤당 영업이익', 'ratio', r => { const t = T(r); return t > 0 ? r.op / t : null; }, dol);
 
-  sec('설비 가동률');
+  sec('설비 가동률', 'c-stock');
   const types = [...new Set(s.lines.map(l => l.type))];
   for (const ty of types)
     row(CFG.LINE[ty].label, 'ratio', r => lineUtilOf(r)[ty], pc);
 
-  sec('재고 · 재원 (월말)');
+  sec('재고 · 재원 (월말)', 'c-stock');
   row('창고 현물 (소재 + 제품)', 'bal', r => stockOf(r).onhand, tt);
   row('└ 가공 제품', 'bal', r => stockOf(r).fg, tt, { cls: 'sub' });
   row('해상 미착', 'bal', r => stockOf(r).sea, tt);
@@ -1150,7 +1172,7 @@ function perfPanel(s) {
   /* 순운전자본은 분해해서 보여준다. "돈이 어디 있나" 같은 말랑한 표현 대신
      회계 그대로 — 매출채권 + 재고자산 − 매입채무 = 순운전자본.
      이 숫자가 곧 은행에서 빌려야 하는 돈이다. */
-  sec('순운전자본 (월말 · 천달러)');
+  sec('순운전자본 (월말 · 천달러)', 'c-wc');
   row('매출채권', 'bal', r => (r.bs || {}).ar || 0, K, { note: '고객에게서 받을 소재·가공 대금' });
   row('└ 지연채권', 'bal', r => (r.bs || {}).arDelayed || 0, K, { inv: true, cls: 'sub' });
   row('재고자산 (창고 현물)', 'bal', r => (r.bs || {}).invValue || 0, K, { note: '소재와 가공제품의 장부가' });
@@ -1160,7 +1182,7 @@ function perfPanel(s) {
   row('(참고) 해상 미착 금액', 'bal', r => (r.bs || {}).seaValue || 0, K,
       { cls: 'sub', note: '배 위에 있는 소재값. 도착해야 매입채무로 잡히므로 위 계산에는 안 들어간다' });
 
-  sec('차입 (월말 · 천달러)');
+  sec('차입 (월말 · 천달러)', 'c-debt');
   row('현금', 'bal', r => (r.bs || {}).cash || 0, K);
   row('차입금', 'bal', r => (r.bs || {}).debt || 0, K, { inv: true });
   row('은행 한도', 'bal', r => (r.bs || {}).debtLimit || 0, K,
@@ -1210,7 +1232,7 @@ function perfPanel(s) {
     <table>
       <tr><th></th>${heads.map(h => `<th>${h}</th>`).join('')}</tr>
       ${rows.map(r => r.head
-        ? `<tr class="head"><th colspan="4">${r.head}</th></tr>`
+        ? `<tr class="head ${r.cls || ''}"><th colspan="4">${r.head}</th></tr>`
         : `<tr class="${r.cls || ''}"><td>${r.label}${r.note ? `<span class="rn">${r.note}</span>` : ''}</td>${cell(r).map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}
     </table></div>`;
 }
@@ -1252,23 +1274,33 @@ function takeoverBrief(s) {
 }
 
 /* ---------- 고객 구성 ---------- */
+/* 고객 구성 — 결정에 쓰이는 것만 남긴다.
+   예전에는 "판가 톤당 +$0.2, 물량 흔들림 ±10%, 블랭킹 비중 17%"를 밑에 달아뒀는데,
+   그 숫자를 보고 사장이 할 수 있는 일이 없었다. 포트폴리오 가중평균은
+   엔진이 알아서 쓰면 되는 값이지 화면에 띄울 값이 아니다.
+   대신 깎아준 단가는 "얼마 깎였나"가 아니라 "그래서 한 달에 얼마가 새나"로 보여준다. */
 function custPanel(s) {
   const sh = s.custShare || {};
-  const pf = portfolio(s);
+  const L = look(s);
   return `<div class="card">
     <h2>우리 고객 구성</h2>
     ${Object.entries(CFG.CUSTOMERS).map(([k, c]) => {
       const pend = (s.custQueue || []).filter(q => q.key === k);
       const r = G && G.W ? G.W.rel[k] : 60, cut = G && G.W ? G.W.cut[k] : 0;
+      // 깎아준 단가 × 그 고객 월 판매량 = 매달 사라지는 이익
+      const leak = cut * L.need * (sh[k] || 0);
       return `<div class="custbar"><span>${CUST[k]} · ${c.name}</span>
         <span class="track"><span class="fill" style="width:${(sh[k] || 0) * 100}%"></span></span>
         <span>${((sh[k] || 0) * 100).toFixed(0)}%${pend.length
           ? `<span class="pend">▲${dateLabel(pend[0].turn).replace(/^\d+년 /, '')}</span>` : ''}</span>
-        <span class="rel ${relCls(r)}">${relLabel(r)}${cut > 0 ? ` · −$${cut}/t` : ''}</span></div>`;
+        <span class="rel ${relCls(r)}">${relLabel(r)}</span>
+        <span class="leak">${cut > 0
+          ? `깎아준 단가로 월 −$${leak >= 1000 ? fmt(Math.round(leak / 1000)) + 'k' : Math.round(leak).toLocaleString()}`
+          : '단가 그대로'}</span>
+      </div>`;
     }).join('')}
-    <p class="hint">이 구성이 판가 톤당 ${pf.margin >= 0 ? '+' : '−'}$${Math.abs(pf.margin).toFixed(1)},
-      물량 흔들림 ±${(pf.vol * 100).toFixed(0)}%, 대금 회수 ${pf.dso.toFixed(1)}개월,
-      블랭킹 비중 ${(pf.blank * 100).toFixed(0)}%를 만듭니다.</p>
+    <p class="hint">관계가 나빠지면 주문이 줄고, 바닥까지 가면 경쟁사로 넘어갑니다.
+      깎아준 단가는 계약이 살아 있는 한 매달 나갑니다 — 매년 1월 재협상에서 절반만 되돌릴 수 있습니다.</p>
   </div>`;
 }
 
