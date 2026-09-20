@@ -9,13 +9,28 @@ const fmt = n => Math.round(n).toLocaleString('en-US');
 const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
 const M = n => (n < 0 ? '−$' : '$') + (Math.abs(n) / 1e6).toFixed(1) + 'M';
 
+/* 여섯 사람. 같은 사실을 보고해도 말이 다 다르게 나온다 —
+   그게 이 회사에서 정보가 흐르는 방식이다. 누가 하는 말인지에 따라
+   그대로 믿을지, 반쯤 깎아들을지 사장이 정해야 한다.
+     정 부장  자신만만하고 밀어붙인다. 숫자를 크게 부른다. 낙관이 섞여 있다
+     서 대리  과하게 공손하고 조심스럽다. 결론을 늦게 말한다. 대신 거짓말을 안 한다
+     구 공장장 경상도 사투리. 기계 이야기는 틀린 적이 없다. 돈 이야기는 안 한다
+     한 부장  건조하고 시니컬하다. 결론부터 말하고 위로는 안 한다
+     오 과장  깐깐하다. 감정 없이 수치로만 말한다. 원칙에서 안 물러선다
+     린 매니저 밝고 사람 중심이다. 한국어가 조금 서툴다. 현장 분위기는 제일 먼저 안다 */
 const CAST = {
-  seo:  { face: '📋', img: 'cast_seo',  name: '서 대리',   role: '구매 · 자재' },
-  jung: { face: '📞', img: 'cast_jung', name: '정 부장',   role: '영업 · 소재 발주' },
-  gu:   { face: '🔧', img: 'cast_gu',   name: '구 공장장', role: '생산' },
-  han:  { face: '🧮', img: 'cast_han',  name: '한 부장',   role: '관리 · 재무·인사·총무' },
-  oh:   { face: '🔍', img: 'cast_oh',   name: '오 과장',   role: '품질' },
-  lin:  { face: '☕', img: 'cast_lin',  name: '린 매니저', role: '현지' },
+  seo:  { face: '📋', img: 'cast_seo',  name: '서 대리',   role: '구매 · 자재',
+          tone: '조심스럽고 공손함' },
+  jung: { face: '📞', img: 'cast_jung', name: '정 부장',   role: '영업 · 소재 발주',
+          tone: '자신만만함 · 낙관이 섞임' },
+  gu:   { face: '🔧', img: 'cast_gu',   name: '구 공장장', role: '생산',
+          tone: '사투리 · 기계 이야기는 정확함' },
+  han:  { face: '🧮', img: 'cast_han',  name: '한 부장',   role: '관리 · 재무·인사·총무',
+          tone: '건조하고 시니컬함' },
+  oh:   { face: '🔍', img: 'cast_oh',   name: '오 과장',   role: '품질',
+          tone: '깐깐함 · 수치로만 말함' },
+  lin:  { face: '☕', img: 'cast_lin',  name: '린 매니저', role: '현지',
+          tone: '밝음 · 현장 분위기에 밝음' },
 };
 
 /* 말풍선 얼굴. 초상 이미지가 있으면 그걸 쓰고, 없으면 이모지로 돌아간다. */
@@ -33,12 +48,16 @@ const COUNTRIES = {
 /* 난이도. 하드는 자본도 얇고 물려받은 판매 기반도 작다.
    같은 판단을 해도 실수 한 번의 값이 다르다. */
 const DIFF = {
-  normal: { key:'normal', name:'노멀', equity:78_000_000, share:0.10, debtRate:0.60,
-    target:45_000_000, trust:65,
-    desc:'자본금 $78M. 본사가 붙여준 판매 기반도 넉넉합니다. 판단을 배우기에 좋습니다.' },
-  hard:   { key:'hard',   name:'하드', equity:66_000_000, share:0.082, debtRate:0.55,
-    target:58_000_000, trust:55,
-    desc:'자본금 $66M. 은행 한도도 좁고 물려받은 고객도 적습니다. 첫 1년을 버티는 것부터 일입니다.' },
+  /* 자본금은 운전자본에서 역산했다. 순운전자본이 노멀 $32M, 하드 $23M이고
+     토지·건물·설비가 $20M이니 굴리는 돈은 $43~52M이다. 그중 자본금이 대는 몫을
+     절반 남짓으로 잡고 나머지를 은행에서 빌린다 — 실제 코일센터의 자본 구조다.
+     가공마진이 톤당 $40인 장사라 이자가 곧바로 적자로 이어진다. 그게 이 게임의 압력이다. */
+  normal: { key:'normal', name:'노멀', equity:35_000_000, share:0.10, rate:0.03,
+    target:45_000_000, trust:65, legacy:2_400,
+    desc:'자본금 $35M, 은행 이자 3%. 차입은 $22M쯤. 본사가 붙여준 판매 기반도 넉넉합니다.' },
+  hard:   { key:'hard',   name:'하드', equity:25_000_000, share:0.075, rate:0.05,
+    target:58_000_000, trust:55, legacy:10_000,
+    desc:'자본금 $25M, 은행 이자 5%. 차입이 $30M인데 물려받은 고객은 적고, 창고엔 장기재고 1만 톤이 서 있습니다.' },
 };
 const SETUP = { country: 'NV', lines: ['SLIT', 'LEVEL'], diff: 'normal' };
 
@@ -54,7 +73,7 @@ function newGame(opt) {
   const D = DIFF[opt.diff] || DIFF.normal;
   const s = createInitialState({
     seed: (Math.random() * 1e9) | 0,
-    equity: D.equity, debtLimit: Math.round(D.equity * D.debtRate),
+    equity: D.equity, debtRate: D.rate,
     myShare: D.share, trust: D.trust,
     lines: opt.lines, country: opt.country, companyName: opt.name,
   });
@@ -71,8 +90,9 @@ function newGame(opt) {
 
   /* 이미 돌던 회사를 넘겨받는다 — 전임 사장의 1년을 실제로 돌려서 그 상태로 시작한다 */
   G.s = runPrelude(G.s);
-  G.s.trust = D.trust; G.s.morale = 70;
-  applyLegacy(G.s);
+  // 본사 신뢰는 새 사장에게 새로 매긴다. 사기는 전임자가 남긴 그대로 물려받는다.
+  G.s.trust = D.trust;
+  applyLegacy(G.s, D);
   G.W.snaps.push(snapshot(G.s, G.W, G.s.prelude[G.s.prelude.length - 1]));
 
   /* 대형 사건은 판마다 다른 달에, 다른 조합으로 온다.
@@ -103,7 +123,7 @@ function dealTurn() {
 
   const s = G.s, W = G.W, used = new Set();
   G.before = { rel: { ...W.rel }, equip: W.equip };
-  G.ui.cover = { tight: 1.4, normal: 2.2, ample: 3.0 }[W.policy] ?? 2.2;
+  G.ui.cover = { tight: 2.0, normal: 2.9, ample: 3.6 }[W.policy] ?? 2.9;
 
   const put = (card) => {
     if (!card) return false;
@@ -137,6 +157,11 @@ function dealTurn() {
   // 4. 너무 조용하면 기회를 하나 올린다
   if (G.queue.length < 2) put(custFocusCard(s, W));
   if (!G.queue.length) put(policyCard(s, W, coverOf(s)));
+
+  /* 5. 소재 발주는 매달 마지막에 올린다. 이 회사에서 사장이 매달 반드시 하는 유일한 일이다.
+     다른 안건을 다 보고 나서 — 고장이 났는지, 고객이 물량을 더 준다는지 알고 나서 — 숫자를 적어야 하니까. */
+  G.ui.orderTon = null; G.ui.orderBy = null;
+  G.queue.push({ deck: 'order', card: orderCard(s, W, look(s)) });
 }
 
 /* ---------- 결재 팝업: 카드 한 장씩, 고르면 바로 결과 ---------- */
@@ -190,15 +215,102 @@ function openDecisions() {
     <span class="step">${G.qi + 1} / ${G.queue.length}</span></div>`;
 
   const ask = () => {
+    if (card.form === 'order') return askOrder();
     dlg.innerHTML = `<div class="dlg">${head}
       <div class="crew">${crewBlock(who)}
-        <div class="crew-body"><div class="line">${card.text}</div></div></div>
+        <div class="crew-body"><div class="line says">${card.text}</div></div></div>
       <div class="deckq"><h2>${card.title}</h2></div>
       <div class="optlist">${card.opts.map((o, i) => `
         <button data-o="${i}"><b>${o.label}</b>${
           o.hint ? `<span class="why">${o.hint}</span>` : ''}${fxChips(o.fx)}</button>`).join('')}</div>
     </div>`;
     dlg.querySelectorAll('[data-o]').forEach(b => b.onclick = () => choose(+b.dataset.o));
+  };
+
+  /* 고객군별 발주 — 선택지가 아니라 숫자를 직접 넣는 화면.
+     한 줄에 그 고객군의 월 사용량 · 창고 · 해상 · 본사 생산 중 · 재고율 · 재원율이 다 있다.
+     사장이 보고 톤수를 적는다. 합계와 합계 재원율이 아래에서 실시간으로 바뀐다. */
+  const askOrder = () => {
+    const rows = card.rows;
+    const vals = {};
+    for (const r of rows) vals[r.k] = r.rec;
+    const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
+
+    const paint = () => {
+      const totUse = rows.reduce((a, r) => a + r.use, 0);
+      const totRes = rows.reduce((a, r) => a + r.res, 0);
+      const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
+      const totRec = rows.reduce((a, r) => a + r.rec, 0);
+      const after = totUse > 0 ? (totRes + tot) / totUse : 0;
+      const pct = totRec > 0 ? Math.round(tot / totRec * 100) : 100;
+      const box = dlg.querySelector('#osum');
+      if (box) box.innerHTML =
+        `<b>합계 ${fmt(Math.round(tot))}톤</b>
+         <span class="${pct > 125 ? 'dn' : pct < 75 ? 'dn' : 'up'}">권장 대비 ${pct}%</span>
+         <span>발주 뒤 재원율 ${after.toFixed(1)}개월</span>`;
+      rows.forEach(r => {
+        const cell = dlg.querySelector(`#oaf-${r.k}`);
+        if (cell) cell.textContent = r.use > 0 ? ((r.res + (vals[r.k] || 0)) / r.use).toFixed(1) : '–';
+      });
+    };
+
+    dlg.innerHTML = `<div class="dlg">${head}
+      <div class="crew">${crewBlock(who)}
+        <div class="crew-body"><div class="line says">${card.text}</div></div></div>
+      <div class="deckq"><h2>${card.title}</h2></div>
+      <div class="ordwrap">
+        <table class="ordt">
+          <tr><th>고객군</th><th>월 사용<br><i>소재 기준</i></th><th>창고<br>현물</th><th>해상<br>미착</th>
+              <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th><th>발주 (톤)</th><th>발주 뒤<br>재원율</th></tr>
+          ${rows.map(r => `<tr>
+            <td class="oname">${CUST[r.k]} <i>${CFG.CUSTOMERS[r.k].name}</i></td>
+            <td>${fmt(Math.round(r.use))}</td>
+            <td>${fmt(Math.round(r.oh))}</td>
+            <td>${fmt(Math.round(r.sea))}</td>
+            <td>${fmt(Math.round(r.prod))}</td>
+            <td class="${r.invM < COVER.warn ? 'dn' : ''}">${r.invM.toFixed(1)}</td>
+            <td>${r.resM.toFixed(1)}</td>
+            <td><input type="number" min="0" max="${r.max}" step="50" data-ok="${r.k}" value="${r.rec}"></td>
+            <td id="oaf-${r.k}" class="oaf">–</td></tr>`).join('')}
+        </table>
+        <div class="ordbar">
+          <div id="osum" class="osum"></div>
+          <div class="obtns">
+            <button class="mini" data-set="rec">권장량</button>
+            <button class="mini" data-set="0">전부 0</button>
+            <button class="mini" data-set="0.8">권장 ×0.8</button>
+            <button class="mini" data-set="1.2">권장 ×1.2</button>
+          </div>
+        </div>
+        <p class="hint">고객군별 재고는 판매 비중으로 배분한 추정치입니다. 같은 규격을 여러 고객이 쓰니
+          칼같이 갈리지는 않습니다. 지금 걸면 <b>${lead}개월 뒤</b> 야드에 내립니다.<br>
+          본사 압연 스케줄 때문에 한 달에 소요량의 <b>1.6배</b>까지만 걸 수 있습니다 —
+          한 번 바닥나면 한 달 만에는 못 메웁니다.</p>
+        <button class="primary" id="osubmit">이대로 발주한다</button>
+      </div>
+    </div>`;
+
+    dlg.querySelectorAll('[data-ok]').forEach(inp => inp.oninput = () => {
+      const r = rows.find(x => x.k === inp.dataset.ok);
+      vals[inp.dataset.ok] = Math.min(r.max, Math.max(0, +inp.value || 0)); paint();
+    });
+    dlg.querySelectorAll('[data-set]').forEach(b => b.onclick = () => {
+      const m = b.dataset.set;
+      rows.forEach(r => { vals[r.k] = m === 'rec' ? r.rec : m === '0' ? 0 : Math.min(r.max, Math.round(r.rec * +m / 50) * 50); });
+      dlg.querySelectorAll('[data-ok]').forEach(i => i.value = vals[i.dataset.ok]);
+      paint();
+    });
+    dlg.querySelector('#osubmit').onclick = () => submitOrder(vals);
+    paint();
+  };
+
+  const submitOrder = (vals) => {
+    const before = snap(G.s);
+    const msg = card.submit(vals, G.s, G) || '';
+    const chips = deltaChips(before, snap(G.s));
+    G.done.push({ deck, title: card.title, choice: `${fmt(Math.round(Object.values(vals).reduce((a, b) => a + b, 0)))}톤`, msg });
+    if (msg) G.resultLines = (G.resultLines || []).concat(msg);
+    showVerdict(`${fmt(Math.round(Object.values(vals).reduce((a, b) => a + b, 0)))}톤 발주`, msg, chips);
   };
 
   const choose = (i) => {
@@ -212,18 +324,23 @@ function openDecisions() {
     G.done.push({ deck, title: card.title, choice: o.label, msg });
     if (msg) G.resultLines = (G.resultLines || []).concat(msg);
 
+    showVerdict(o.label, msg, chips,
+      o.mult && o.mult !== 1 ? `<div class="chips"><span class="chip ${o.mult >= 1 ? 'up' : 'down'}">
+        이번 달 소재 발주 ×${o.mult}</span></div>` : '');
+  };
+
+  const showVerdict = (choiceLabel, msg, chips, extra = '') => {
     const last = G.qi + 1 >= G.queue.length;
     const pic = who.img ? `<img src="${A(who.img + `.png`)}" alt="">`
                         : `<div class="em">${who.face}</div>`;
     dlg.innerHTML = `<div class="dlg">${head}
       <div class="verdict">
         <div class="vlabel">사장님의 결정</div>
-        <div class="vchoice">${o.label}</div>
+        <div class="vchoice">${choiceLabel}</div>
         ${msg ? `<div class="vwho">${pic}<span>${who.name}</span></div>
-                 <p class="vmsg">${msg}</p>` : ''}
+                 <p class="vmsg says">${msg}</p>` : ''}
         ${chips ? `<div class="chips">${chips}</div>` : ''}
-        ${o.mult && o.mult !== 1 ? `<div class="chips"><span class="chip ${o.mult >= 1 ? 'up' : 'down'}">
-          이번 달 소재 발주 ×${o.mult}</span></div>` : ''}
+        ${extra}
       </div>
       <div class="vfoot"><button class="primary" id="nx">${
         last ? (G.mpt > 1 ? '석 달 보내기' : '한 달 보내기') : '다음 결재'}</button></div></div>`;
@@ -249,7 +366,7 @@ function cardCtx(s) {
   return { load, tight: load > 0.97, idle: load < 0.55, pmTrend };
 }
 
-const DECK_LABEL = { mat: '자재', hr: '인사', ga: '총무', buy: '소재 발주', policy: '소재 발주 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', op: '운영', life: '사내', big: '주요 사건' };
+const DECK_LABEL = { mat: '자재', hr: '인사', ga: '총무', buy: '소재 발주', policy: '소재 발주 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', order: '소재 발주', op: '운영', life: '사내', big: '주요 사건' };
 
 /* 매달 영업 인력을 어느 고객군에 붙일지. 결실은 석 달 뒤. */
 function customerCard(s) {
@@ -270,6 +387,72 @@ function customerCard(s) {
              + `대신 다른 고객군은 그동안 조금씩 빠집니다.`;
       },
     })),
+  };
+}
+
+/* ============================================================
+   이번 달 소재 발주 — 고객군별로 직접 정한다.
+
+   이게 코일센터 사장이 매달 실제로 하는 일이다. 내시를 보고, 창고와 바다와
+   본사 공장에 뭐가 얼마나 있는지 보고, 고객군마다 몇 톤을 걸지 정한다.
+   너무 걸면 현금이 창고에 묶이고 묵어서 값이 떨어진다. 덜 걸면 석 달 뒤 결품이다.
+
+   재고를 고객군별로 딱 갈라놓을 수는 없다 — 같은 규격을 여러 고객이 쓰니까.
+   그래서 판매 비중으로 배분한 추정치를 보여준다. 실무에서도 그렇게 본다.
+   ============================================================ */
+function orderRows(s, L) {
+  const onhand = inventoryTons(s), sea = seaTons(s), prod = prodTons(s);
+  const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
+  const cover = (G && G.ui && G.ui.cover) || 2.9;
+  return Object.keys(CUST).map(k => {
+    const sh = s.custShare[k] || 0;
+    const use = L.need * sh;                       // 소재 기준 월 소요량
+    const oh = onhand * sh, se = sea * sh, pr = prod * sh;
+    const inv = oh + se, res = inv + pr;
+    /* 본사 압연 스케줄에 한 달에 밀어 넣을 수 있는 양은 한계가 있다.
+       재고가 바닥나도 한 달에 소요량의 1.6배까지만 걸린다 — 그래서 결품은
+       한 번 나면 한 달 만에 못 메운다. 그게 발주를 미루면 안 되는 이유다. */
+    const MAX = use * 1.6;
+    const rec = Math.min(MAX, Math.max(0, use * (lead + cover) - res));
+    return { k, sh, use, oh, sea: se, prod: pr, inv, res, max: Math.round(MAX / 50) * 50,
+      invM: use > 0 ? inv / use : 0, resM: use > 0 ? res / use : 0,
+      rec: Math.round(rec / 50) * 50 };
+  }).filter(r => r.sh > 0.01);
+}
+
+function orderCard(s, W, L) {
+  const rows = orderRows(s, L);
+  const sn = stockNow(s);
+  return {
+    id: 'op-order', who: 'jung', topic: 'order', form: 'order', rows,
+    title: '이번 달 소재 발주를 정해주십시오',
+    text: `사장님, 이번 달 발주입니다. 지금 전체로 보면 재고율 ${sn.invM.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월이고요. `
+        + `고객군별로 쓰는 속도가 다르니까 한 줄씩 보고 정하시죠. `
+        + `제가 계산한 권장량을 넣어뒀는데, 이건 어디까지나 내시가 그대로 간다는 전제입니다. `
+        + `걸면 ${CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd}개월 뒤에 들어옵니다. 그때 가서 바꾸자는 건 안 됩니다.`,
+    submit: (vals, s, G) => {
+      // 본사가 한 달에 받아주는 한도. 넘겨 적어도 여기서 잘린다.
+      for (const r of rows) vals[r.k] = Math.min(vals[r.k] || 0, r.max);
+      const tot = Object.values(vals).reduce((a, b) => a + b, 0);
+      const rec = rows.reduce((a, r) => a + r.rec, 0);
+      G.ui.orderBy = { ...vals };
+      G.ui.orderTon = tot;
+      const ratio = rec > 0 ? tot / rec : 1;
+      const tag = ratio > 1.25 ? 'overbuy' : ratio < 0.75 ? 'underbuy' : 'normal-buy';
+      remember(W, s, tag, `소재 발주 ${fmt(Math.round(tot))}톤 (권장의 ${Math.round(ratio * 100)}%)`);
+      lever(G, `소재 발주 ${fmt(Math.round(tot))}톤`, {
+        risk: ratio > 1.25 ? `${CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd}개월 뒤 재고 과다 · 현금 묶임`
+            : ratio < 0.75 ? `${CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd}개월 뒤 결품 위험` : null,
+      });
+      if (ratio > 1.25) styleAdd(W, 'grow');
+      if (ratio < 0.75) styleAdd(W, 'cash');
+      const detail = rows.map(r => `${CUST[r.k]} ${fmt(Math.round(vals[r.k] || 0))}t`).join(' · ');
+      return ratio > 1.25
+        ? `${fmt(Math.round(tot))}톤 걸었습니다. 권장보다 ${Math.round((ratio - 1) * 100)}% 많습니다. ${detail}. 창고는 각오하셔야 합니다.`
+        : ratio < 0.75
+        ? `${fmt(Math.round(tot))}톤만 걸었습니다. 권장의 ${Math.round(ratio * 100)}%입니다. ${detail}. 석 달 뒤는 제 책임 아닙니다.`
+        : `${fmt(Math.round(tot))}톤 걸었습니다. ${detail}. 무난합니다.`;
+    },
   };
 }
 
@@ -297,8 +480,11 @@ function look(s) {
 // 고른 카드들이 이번 달 발주량에 거는 배수
 function buildDecision(s, ui) {
   const L = look(s);
+  /* 사장이 고객군별로 직접 정한 발주가 있으면 그걸 쓴다.
+     없으면(전임 사장의 프렐류드, 속성 모드의 2·3번째 달) 방침대로 자동으로 건다. */
   const gap = L.need * (CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd + ui.cover) - L.haveP;
-  const buy = Math.max(0, Math.min(gap, L.need * 1.6)) * (G ? (G.mult || 1) : 1);
+  const auto = Math.max(0, Math.min(gap, L.need * 1.6)) * (G ? (G.mult || 1) : 1);
+  const buy = ui.orderTon != null ? ui.orderTon * (G ? (G.mult || 1) : 1) : auto;
   const n = L.now, hasCommon = (s.hqSpotCredit || 0) > 1;
   /* 가공 제품은 열흘치쯤 들고 있어야 한다. 고객 라인은 JIT로 도는데 우리 라인이 매일 그 순서대로
      돌 수는 없다. 그래서 이번 달 내시에 목표 제품재고와의 차이를 더해서 돌린다. */
@@ -373,7 +559,7 @@ function lineList(s, L) {
     const file = { SLIT: 'slit', LEVEL: 'level', BLANK: 'blank' }[l.type] + (on ? '_on' : '_off') + '.png';
     return `<div class="lrow ${on ? '' : 'idle'}">
       <div class="ltop"><b>${CFG.LINE[l.type].label}</b>
-        <i class="${on ? (util > .92 ? 'hot' : 'on') : 'off'}">${on ? `주문 부하 ${pct}%` : '주문 없음'}</i></div>
+        <i class="${on ? (util > .92 ? 'hot' : 'on') : 'off'}">${on ? `이번 달 주문 ${pct}%` : '주문 없음'}</i></div>
       <img src="${A(file)}" alt="">
       <div class="lbot">
         <span class="track"><span class="fill ${util > .92 ? 'over' : ''}" style="width:${pct}%"></span></span>
@@ -400,7 +586,8 @@ function yardRack(s) {
   const over = (raw + fg) > cap;
   const age = inventoryAging(s);
   const oldTon = age[2].qty + age[3].qty;
-  const afloat = s.poOpen.reduce((a, p) => a + p.qty, 0);
+  // 상단 경영지표와 같은 정의를 쓴다 (world.js seaTons/prodTons)
+  const afloat = seaTons(s), inProd = prodTons(s);
   const nextEta = s.poOpen.length ? Math.min(...s.poOpen.map(p => p.etaTurn)) : null;
   const fgSlit = s.invFg.filter(l => l.proc !== 'TRAP' && l.proc !== 'DIE').reduce((a, l) => a + l.qty, 0);
   const fgBlank = s.invFg.filter(l => l.proc === 'TRAP' || l.proc === 'DIE').reduce((a, l) => a + l.qty, 0);
@@ -419,8 +606,10 @@ function yardRack(s) {
   const cells = [
     cell(tier, '소재 야드', `${fmt(raw)}t`, over ? 'bad' : '',
       over ? '한도 초과 · 동선이 막혔습니다' : `창고 한도의 ${Math.round(raw / cap * 100)}%`),
-    cell(afloat > 0 ? 'ship' : null, '미착 (바다 위)', afloat > 0 ? `${fmt(afloat)}t` : '없음', '',
+    cell(afloat > 0 ? 'ship' : null, '해상 미착', afloat > 0 ? `${fmt(afloat)}t` : '없음', '',
       afloat > 0 ? `${dateLabel(nextEta)} 첫 배 도착` : '들어올 배가 없습니다'),
+    cell(inProd > 0 ? 'coil_m' : null, '본사 생산 중', inProd > 0 ? `${fmt(inProd)}t` : '없음', '',
+      inProd > 0 ? '아직 본사 공장 안에 있습니다' : '걸어둔 발주가 없습니다'),
     cell(fgSlit > 0 ? 'fg_slit' : null, '가공 제품', `${fmt(fgSlit)}t`, '', '슬리팅 · 레벨링 · 통코일'),
     cell(fgBlank > 0 ? 'fg_blank' : null, '블랭크', `${fmt(fgBlank)}t`, '', '프레스 가공품'),
     cell(oldTon > 0 ? 'coil_tarp' : null, '장기재고', oldTon > 0 ? `${fmt(oldTon)}t` : '없음',
@@ -436,13 +625,16 @@ function yardRack(s) {
 function plantView(s, L) {
   return `<div class="grid g2">
       <div class="card"><h2>공장동</h2>${hallView(s)}</div>
-      <div class="card"><h2>설비</h2>${lineList(s, L)}</div>
+      <div class="card"><h2>설비 <span class="muted">— 이번 달 주문 기준</span></h2>${lineList(s, L)}</div>
     </div>
     ${yardRack(s)}`;
 }
 
 /* ---------- 렌더 ---------- */
 function render() {
+  /* 결재 팝업은 #app 바깥(body 바로 아래)에 붙는다. 화면을 갈아끼워도 혼자 살아남아서,
+     예전 판의 카드나 결산 버튼이 새 화면 위에 떠 있게 된다. 그릴 때마다 걷어낸다. */
+  document.querySelectorAll('dialog').forEach(d => { try { d.close(); } catch {} d.remove(); });
   if (!G) return renderSetup();
   if (G.s.over) return renderEnd();
   renderPlay();
@@ -451,28 +643,46 @@ function render() {
 function renderSetup() {
   const machine = SETUP.lines.reduce((a, t) => a + CFG.LINE[t].capex, 0);
   const D = DIFF[SETUP.diff] || DIFF.normal;
-  const rest = D.equity - CFG.INFRA_TOTAL - machine;
+  const capex = CFG.INFRA_TOTAL + machine;
+  const debt0 = Math.max(0, capex + CFG.OPEN_CASH - D.equity);   // 자본금으로 모자란 만큼은 처음부터 차입
+  const rest = D.equity - capex + debt0;
   const country = COUNTRIES[SETUP.country];
   const diffBtn = d => `<button data-diff="${d.key}" class="modecard ${SETUP.diff === d.key ? 'on' : ''}">
       <b>${SETUP.diff === d.key ? '✓ ' : ''}${d.name}</b>
-      <span class="n">자본금 ${M(d.equity)} · 판매 기반 ${(d.share * 100).toFixed(1)}%</span>
+      <span class="n">자본금 ${M(d.equity)} · 이자 ${(d.rate * 100).toFixed(0)}% · 판매 기반 ${(d.share * 100).toFixed(1)}%</span>
       <span class="d">${d.desc}</span></button>`;
 
+  // 이어하기 — 저장이 있으면 제일 위에 올린다. 새 판을 고르기 전에 보여야 한다.
+  const sv = loadedSave();
+  const resumeCard = sv ? `<div class="card resume">
+      <h2>이어서 하기</h2>
+      <p class="hint"><b>${sv.s.companyName}</b> · ${DIFF[sv.diffKey] ? DIFF[sv.diffKey].name : ''}
+        · ${dateLabel(sv.s.turn)} · ${sinceLabel(sv.at)}에 저장</p>
+      <div class="hbtns">
+        <button class="primary" id="btn-resume">${dateLabel(sv.s.turn)}부터 이어서</button>
+        <button class="mini" id="btn-drop">이 저장 버리고 새로 시작</button>
+      </div>
+    </div>` : '';
+
   app.innerHTML = `
-    <h1>코일센터 경영 시뮬레이터</h1>
+    <h1>코일센터의 제왕</h1>
+    <p class="byline">로드 오브 코일센터 &nbsp;·&nbsp; 기획과 구성 <b>by 곤사마</b></p>
+    <p class="thanks">Special Thanks to &nbsp; 랴됴헷도 &nbsp;·&nbsp; 원찰스 &nbsp;·&nbsp; 규한화</p>
     <p class="sub">2026년 1월, 해외 코일센터 사장으로 부임합니다. 4년 동안 호황 · 공급과잉 · 불황 · 회복이
       한 번씩 오는데, 순서와 길이는 판마다 다릅니다.</p>
+    ${resumeCard}
 
     <div class="card">
       <h2>난이도</h2>
       <div class="modes">${diffBtn(DIFF.normal)}${diffBtn(DIFF.hard)}</div>
-      <p class="hint">하드는 통장도 얇고 은행 한도도 좁습니다. 본사가 요구하는 이익 목표는
-        ${M(DIFF.normal.target)}에서 <b>${M(DIFF.hard.target)}</b>로 올라갑니다.
+      <p class="hint">하드는 자본금이 적은 만큼 빚이 많고 이자가 5%입니다. 물려받는 물량도 적은데
+        창고에는 전임자가 남긴 장기재고 <b>1만 톤</b>이 서 있습니다.
+        본사가 요구하는 이익 목표도 ${M(DIFF.normal.target)}에서 <b>${M(DIFF.hard.target)}</b>로 올라갑니다.
         S등급은 거의 안 나옵니다.</p>
     </div>
 
     <div class="card">
-      <div class="say"><div class="face">${face('han')}</div><div class="bubble">
+      <div class="say"><div class="face">${face('han')}</div><div class="bubble says">
         <span class="who">${CAST.han.name} · ${CAST.han.role}</span>
         사장님, 법인은 이미 세워져 있습니다. 숫자는 여기 정리해뒀습니다. 이름만 정해주시면 됩니다.</div></div>
       <table>
@@ -481,10 +691,15 @@ function renderSetup() {
         <tr><td>자본금</td><td>${money(D.equity)}</td></tr>
         <tr><td>토지·공장동</td><td>−${fmt(CFG.INFRA_TOTAL)}</td></tr>
         <tr><td>설비 2라인</td><td>−${fmt(machine)}</td></tr>
-        <tr class="tot"><td>개업 후 통장</td><td>${money(rest)}</td></tr>
-        <tr><td>은행 한도</td><td>${money(Math.round(D.equity * D.debtRate))}</td></tr>
+        ${debt0 > 0 ? `<tr><td>시설자금 차입</td><td>+${fmt(debt0)} <span class="muted">— 자본금으로 모자란 만큼</span></td></tr>` : ''}
+        <tr class="tot"><td>개업 시 통장</td><td>${money(rest)}</td></tr>
+        <tr><td>은행 이자</td><td>연 ${(D.rate * 100).toFixed(0)}%</td></tr>
       </table>
-      <p class="hint">한도는 재고와 매출채권의 70%까지 붙습니다. 공장동 하나에 3라인까지 들어갑니다.</p>
+      <p class="hint">이건 법인을 세울 때의 자본 구조입니다. 사장님이 넘겨받는 건 이 회사가
+        몇 해 굴러간 뒤의 모습이라, 실제 재고·채권·차입금은 부임 첫날 관리부장이 보고드립니다.<br>
+        은행 한도는 재고·매출채권의 70%에 땅·건물 담보 60%와 본사 지급보증을 더해 붙습니다.
+        회전한도라 현금이 남으면 자동으로 갚고, 모자라면 자동으로 끌어 씁니다.
+        공장동 하나에 3라인까지 들어갑니다.</p>
       <label class="row"><div class="lab"><span>회사 이름</span></div>
         <input id="nm" placeholder="예: 한빛 코일센터"
           style="width:100%;padding:11px 13px;border:2px solid var(--ink);font:inherit;background:var(--panel);color:var(--ink)"></label>
@@ -506,14 +721,28 @@ function renderSetup() {
             빠르게 한 판 끝내보고 싶을 때. 대신 중간에 손을 못 댑니다.</span>
         </button>
       </div>
-    </div>`;
+    </div>
+
+    ${installPanel()}
+    ${hallPanel()}`;
 
   app.querySelectorAll('[data-diff]').forEach(b => b.onclick = () => {
     SETUP.diff = b.dataset.diff; renderSetup();
   });
-  const start = mode => newGame({ ...SETUP, mode, name: $('#nm').value.trim() || '노바리아 코일센터' });
+  const start = mode => {
+    // 새 판을 시작하면 이전 저장은 덮인다. 실수로 날리지 않게 한 번 묻는다.
+    if (loadedSave() && !confirm('저장해둔 판이 있습니다. 새로 시작하면 그 판은 지워집니다. 계속할까요?')) return;
+    clearSave();
+    newGame({ ...SETUP, mode, name: $('#nm').value.trim() || '노바리아 코일센터' });
+  };
   $('#go-normal').onclick = () => start('normal');
   $('#go-quick').onclick = () => start('quick');
+  const rb = $('#btn-resume'); if (rb) rb.onclick = resumeGame;
+  const db = $('#btn-drop'); if (db) db.onclick = () => {
+    if (confirm('저장해둔 판을 지웁니다. 되돌릴 수 없습니다.')) { clearSave(); renderSetup(); }
+  };
+  wireInstall();
+  wireHall();
 }
 
 /* ============================================================
@@ -557,12 +786,44 @@ function impactPanel(W) {
 }
 
 /* 이번 달 여파 — 과거의 결정이 지금 돌아온 것 */
+/* 돌아온 청구서 — 과거의 결정이 지금 돌아온 것.
+   결과만 툭 던지지 않는다. 언제 무슨 결정을 했고, 몇 달 걸려서, 지금 무엇이 됐는지
+   화살표로 이어 보여준다. 그 고리가 안 보이면 이 게임은 그냥 운이다. */
 function firedPanel(W) {
   if (!W.lastFired.length) return '';
   return `<div class="card fired">
-    <h2>돌아온 청구서</h2>
-    ${W.lastFired.map(f => `<div class="fire">
-      <b>${f.text}</b>${f.why ? `<span>원인 · ${f.why}</span>` : ''}</div>`).join('')}
+    <h2>돌아온 청구서 — 그때 그 결정이 지금</h2>
+    ${W.lastFired.map(f => {
+      const c = f.chain;
+      return `<div class="fire">
+        ${c ? `<div class="chain">
+          <span class="c-then"><i>${c.date}</i>${c.label}</span>
+          <span class="c-arrow">${c.gap > 0 ? `${c.gap}개월 뒤` : '곧바로'} →</span>
+          <span class="c-now">지금</span></div>` : ''}
+        <b>${f.text}</b>${!c && f.why ? `<span>원인 · ${f.why}</span>` : ''}</div>`;
+    }).join('')}
+  </div>`;
+}
+
+/* 아직 안 온 청구서 — 예고된 것들.
+   결재할 때 "?2~4개월 뒤 설비·품질 부담"이라고 붙여줬던 것들을 모아둔다.
+   언제 한 결정인지, 언제쯤 올지 같이 보여준다. */
+function pendingPanel(W, s) {
+  /* 이미 그달에 끝난 것("이번 달 캐파 감소")은 청구서가 아니라 영수증이다. 빼고 보여준다.
+     같은 결정이 여러 번 올라오면 제일 최근 것만 남긴다. */
+  const seen = new Set();
+  const rows = (W.mem || [])
+    .filter(m => m.risk && s.turn - m.turn >= 1 && s.turn - m.turn <= 6 && !/이번 달/.test(m.risk))
+    .reverse()
+    .filter(m => { const k = m.label + m.risk; if (seen.has(k)) return false; seen.add(k); return true; })
+    .slice(0, 6);
+  if (!rows.length) return '';
+  return `<div class="card warns">
+    <h2>아직 안 온 청구서</h2>
+    ${rows.map(m => `<div class="warn">
+      <i>${dateLabel(m.turn)} · ${ago(s.turn - m.turn)}</i>
+      <span><b>${m.label}</b> — ${m.risk}</span></div>`).join('')}
+    <p class="hint">결재할 때 ⚠로 붙어 있던 것들입니다. 아직 청구서가 안 왔을 뿐입니다.</p>
   </div>`;
 }
 
@@ -587,7 +848,7 @@ function briefPanel(s, W) {
         <div class="bface">${face(x.who)}</div>
         <div class="btext"><span class="bwho">${who.name} · ${who.role}
           <em class="k-${x.kind === '확인' ? 'ok' : x.kind === '추정' ? 'est' : 'rum'}">${x.kind}</em></span>
-          ${x.text}</div></div>`; }).join('')}</div>
+          <span class="says">${x.text}</span></div></div>`; }).join('')}</div>
     <p class="hint">소문은 틀릴 수 있습니다. 누가 말했는지, 확인된 건지를 보고 판단하십시오.</p>
   </div>`;
 }
@@ -613,9 +874,6 @@ function renderPlay() {
   const s = G.s, ui = G.ui;
   const d = buildDecision(s, ui), L = d._L;
   const ph = CFG.PHASE[s.market.phase];
-  const stock = inventoryTons(s), transit = s.poOpen.reduce((a, p) => a + p.qty, 0);
-  const coverNow = L.need > 0 ? (stock + transit) / L.need : 0;
-  const canBorrow = s.debt.limit - s.debt.principal;
   const last = s.history[s.history.length - 1];
 
   app.innerHTML = `
@@ -623,6 +881,7 @@ function renderPlay() {
       <b>${s.companyName}</b>
       <span>${periodNow()} <i>${periodIndex()} / ${periodTotal()}</i></span>
       <span class="phase ph-${s.market.phase}">${ph.label}</span>
+      <button class="mini savebtn" id="btn-save">저장하고 나가기</button>
     </div>
 
     ${yearBanner(s)}
@@ -636,6 +895,7 @@ function renderPlay() {
     ${statusPanel(s, G.W)}
 
     <div class="grid g2">${impactPanel(G.W) || ''}${warnPanel(s, G.W) || ''}</div>
+    ${pendingPanel(G.W, s)}
 
     ${briefPanel(s, G.W)}
 
@@ -680,30 +940,28 @@ function renderPlay() {
       </div>
 
       <div class="card">
-        <h2>돈이 어디 있나</h2>
-        <table>
-          <tr><td>통장</td><td>${money(s.cash)}</td></tr>
-          <tr><td>받을 돈</td><td>${money(s.ar.reduce((a, x) => a + x.amount, 0))}</td></tr>
-          <tr><td>창고에 잠긴 돈</td><td>${money(stock * s.market.pm)}</td></tr>
-          <tr><td>바다에 잠긴 돈</td><td>${money(s.poOpen.reduce((a, p) => a + p.qty * p.unitPriceFixed, 0))}</td></tr>
-          <tr><td>줄 돈 (소재값)</td><td class="v neg">−${fmt(s.ap.reduce((a, x) => a + x.amount, 0))}</td></tr>
-          <tr><td>은행 빚</td><td class="v neg">−${fmt(s.debt.principal)}</td></tr>
-          <tr class="tot"><td>더 빌릴 수 있는 돈</td><td>${money(canBorrow)}</td></tr></table>
-        <p class="hint">통장에 돈이 있어도 안심하면 안 됩니다. 대부분 아직 안 낸 소재값입니다.</p>
-        <div class="sep"></div>
         <h2>재고가 얼마나 오래됐나</h2>
         ${agingPanel(s)}
         <div class="sep"></div>
-        <table><tr><td>창고 + 바다</td><td>${fmt(stock + transit)} 톤</td></tr>
-          <tr class="tot"><td>몇 달치인가</td>
-            <td class="${coverNow < 2.5 ? 'v neg' : ''}">${coverNow.toFixed(1)}개월</td></tr></table>
-        ${coverNow < 2.5 && s.turn > 5 ? `<div class="note bad">${CAST.jung.name}: 이대로면 다음 달 어느 고객 하나는 못 채웁니다.</div>` : ''}
+        ${(() => { const n = stockNow(s); return `<table>
+          <tr><td>창고 현물</td><td>${fmt(inventoryTons(s))} 톤</td></tr>
+          <tr><td>해상 미착</td><td>${fmt(n.sea)} 톤</td></tr>
+          <tr class="tot"><td>재고량 · 재고율</td>
+            <td class="${n.invM < COVER.warn ? 'v neg' : ''}">${fmt(n.inv)} 톤 · ${n.invM.toFixed(1)}개월</td></tr>
+          <tr><td>본사 생산 중</td><td>${fmt(n.prod)} 톤</td></tr>
+          <tr class="tot"><td>재원량 · 재원율</td><td>${fmt(n.res)} 톤 · ${n.resM.toFixed(1)}개월</td></tr></table>
+          ${n.invM < COVER.warn && s.turn > 5 ? `<div class="note bad">${CAST.jung.name}: 이대로면 다음 달 어느 고객 하나는 못 채웁니다.</div>` : ''}`; })()}
       </div>
     </div>
 
     ${decisionsMade()}`;
 
   $('#go').onclick = () => { dealTurn(); openDecisions(); };
+  /* 저장은 이 화면(결재 전)에서만 받는다. 결재 팝업 한가운데를 되살리려면
+     카드 함수까지 저장해야 하는데, 그건 저장 파일이 아니라 프로그램을 저장하는 일이다. */
+  $('#btn-save').onclick = () => {
+    if (saveGame()) setTimeout(() => { G = null; render(); }, 700);
+  };
 }
 
 /* 재고 나이 — 같은 18,000톤이라도 전부 한 달짜리인 것과
@@ -720,42 +978,20 @@ function agingPanel(s) {
       <span class="n">${fmt(x.qty)}t</span></div>`).join('')}</div>
     ${old > tot * 0.25
       ? `<div class="note bad">${CAST.oh.name}: 석 달 넘은 게 ${fmt(old)}톤입니다.
-         여섯 달 넘으면 녹이 슬어 값을 못 받습니다.</div>`
+         넉 달부터는 은행이 담보로 안 쳐주고, ${CFG.DEGRADE_DEAD_TURNS}개월을 넘기면 전량 불용재고입니다.</div>`
       : `<p class="hint">석 달까지는 멀쩡합니다. 그 뒤부터 값이 떨어집니다.</p>`}`;
 }
 
-/* 이번 달 슬리팅 배분 — 코일센터에서만 나오는 결정 */
 /* ============================================================
    운영 결정도 사람이 들고 들어온다.
    화면에 슬라이더로 박아두지 않고, 그 달에 필요할 때만 카드로 올린다.
-   ============================================================ */
 
-/* 슬리팅 배분 — 원코일을 어떻게 쪼갤 것인가 */
-function trimCard() {
-  const t = G.trim, base = CFG.YIELD.SLIT;
-  return {
-    id: 'op-trim', who: 'gu', topic: 'op',
-    title: '원코일을 어떻게 쪼갤까요',
-    text: `원코일 폭 ${COIL_WIDTH}mm입니다. 이번 달 고객이 달라는 폭은 `
-        + `${t.widths.map(w => w + 'mm').join(', ')} 이렇게 셋입니다. `
-        + `남는 폭은 그대로 버립니다. 고객하고는 수율 ${(base * 100).toFixed(0)}%로 값을 정해놨으니까, `
-        + `그보다 잘 자르면 그 차액은 우리 겁니다.`,
-    opts: t.options.map((o, i) => {
-      const diff = (o.yield - base) * 100;
-      const combo = t.widths.map((w, k) => o.cuts[k] ? `${w}×${o.cuts[k]}` : null).filter(Boolean).join(' + ');
-      return {
-        label: combo,
-        hint: `수율 ${(o.yield * 100).toFixed(1)}% · 버리는 폭 ${o.trim}mm`,
-        fx: [`${diff >= 0 ? '+' : '−'}약속 대비 ${Math.abs(diff).toFixed(1)}%p`,
-             diff >= 0 ? '+차액은 우리 이익' : '−차액은 우리가 문다'],
-        apply: (s, g) => { g.trimPick = i;
-          return diff >= 0
-            ? `${combo}로 잡았습니다. 약속한 ${(base * 100).toFixed(0)}%보다 잘 나옵니다. 그만큼 우리 이익입니다.`
-            : `${combo}로 잡았습니다. 약속한 수율에 못 미칩니다. 차액은 우리가 뭅니다.`; },
-      };
-    }),
-  };
-}
+   슬리팅 배분(원코일을 몇 조각으로 자를까)은 카드에서 뺐다.
+   선택지마다 수율이 이미 적혀 있어서 제일 높은 걸 고르는 것 말고는 답이 없었다.
+   정답을 보여주고 정답을 고르게 하는 건 결정이 아니다.
+   폭 조합은 그 달 고객이 달라는 대로 정해지고, 구 공장장이 제일 잘 나오는 조합으로 잡는다.
+   수율은 여전히 달마다 흔들리지만, 그건 사장이 고르는 게 아니라 주어지는 조건이다.
+   ============================================================ */
 
 /* 불황기 본사 지시 — 유통향 일반재를 얼마나 받을 것인가 */
 function hqCard(L, s) {
@@ -765,17 +1001,17 @@ function hqCard(L, s) {
     label, hint, fx,
     apply: (st, g) => { g.ui.hqTake = ton;
       if (ton === 0) { st.trust -= CFG.HQ_SPOT.refuseTrustCost;
-        return '본사 지시를 거절했습니다. 본사 영업팀이 서운해합니다. 이런 건 평가 때 기억납니다.'; }
-      return `${fmt(ton)}톤을 받기로 했습니다. 이제 이걸 우리가 알아서 팔아야 합니다. `
+        return '거절했습니다. 본사 영업팀 반응이 싸늘했습니다. 이런 건 연말 평가 때 꼭 나옵니다.'; }
+      return `${fmt(ton)}톤 받기로 했습니다. 이제 이걸 우리가 알아서 팔아야 합니다. `
            + `못 팔면 창고에서 늙다가 반값에 나갑니다.`; },
   });
   return {
     id: 'op-hq', who: 'jung', topic: 'op',
     title: '본사 지시 물량을 얼마나 받을까요',
-    text: `사장님, 본사 공장이 물량을 못 채웠답니다. 유통향 일반재를 시세보다 `
-        + `${(CFG.HQ_SPOT.discount * 100).toFixed(0)}% 싸게 넘기겠다고요. 싼 건 맞습니다. `
-        + `근데 이건 고객이 정해진 물건이 아니에요. 우리가 알아서 팔아야 합니다. `
-        + `그리고 유통향은 본사 정책상 전체 판매의 15%까지밖에 못 팝니다.`,
+    text: `사장님, 본사 공장이 가동률을 못 채웠답니다. 유통향 일반재를 시세보다 `
+        + `${(CFG.HQ_SPOT.discount * 100).toFixed(0)}% 싸게 넘기겠다는데 — 싼 건 진짜 쌉니다. `
+        + `다만 솔직히 말씀드리면, 이건 받는 사람이 정해진 물건이 아닙니다. 우리가 알아서 팔아야 해요. `
+        + `게다가 유통향은 본사 정책상 전체 판매의 15%까지밖에 못 팝니다. 그 위로는 창고에서 늙습니다.`,
     opts: [
       mk(q, '배정량 전부 받는다', `${fmt(q)}톤`,
         ['+본사 신뢰 ↑↑', '−현금이 크게 묶임', '?15% 넘는 건 안 팔린다']),
@@ -796,23 +1032,24 @@ function expandCard(type, L, s) {
   const total = capex + (newBuild ? CFG.INFRA_TOTAL : 0);
   const feed = CFG.LINE[type].cap * 3 * s.market.pm;
   const why = type === 'BLANK'
-    ? '블랭킹은 지금 우리한테 없는 시장입니다. 놓으면 고객이 새로 붙습니다.'
-    : `본사가 주고 싶어 하는 물량이 우리 한계를 월 ${fmt(Math.round(type === 'SLIT' ? L.gapSlit : L.gapLevel))}톤 넘습니다.`;
+    ? '사장님예, 블랭킹은 우리한테 아예 없는 물건 아입니꺼. 한 대 놓으면 고객이 새로 붙습니더.'
+    : `사장님예, 본사가 밀어주고 싶어 하는 물량이 우리 한계를 월 ${fmt(Math.round(type === 'SLIT' ? L.gapSlit : L.gapLevel))}톤 넘깁니더.`;
   return {
     id: 'op-expand', who: 'gu', topic: 'op',
     title: `${CFG.LINE[type].label}를 한 대 더 놓을까요`,
-    text: `${why} ${newBuild ? '근데 자리가 없습니다. 공장동을 한 동 더 지어야 합니다. ' : '자리는 있습니다. '}`
-        + `말씀드릴 게 하나 있는데, 설비값보다 그걸 채울 소재값이 훨씬 큽니다. 석 달치만 해도 ${money(feed)}입니다.`,
+    text: `${why} ${newBuild ? '근데 자리가 없심더. 공장동을 한 동 더 지어야 됩니더. ' : '자리는 있심더. '}`
+        + `근데 하나만 말씀드리겠심더. 기계값보다 그 기계 먹일 소재값이 훨씬 큽니더. `
+        + `석 달치만 쳐도 ${money(feed)}입니더. 기계는 한 번 사면 끝인데 소재는 매달 들어갑니더.`,
     opts: [
       { label: '짓겠습니다', hint: `${CFG.INSTALL_TURNS}개월 뒤 가동`,
         fx: [`−설비 ${money(total)}`, `−소재 ${money(feed)} 추가로 묶임`,
              `+${CFG.INSTALL_TURNS}개월 뒤 캐파 ↑`],
         apply: (st, g) => { g.ui.expandPick = type;
-          return `${CFG.LINE[type].label} 발주했습니다. ${CFG.INSTALL_TURNS}개월 뒤부터 돕니다. `
-               + `그때까지는 돈만 나갑니다.`; } },
+          return `${CFG.LINE[type].label} 발주 넣었심더. ${CFG.INSTALL_TURNS}개월 뒤부터 돕니더. `
+               + `그때까지는 돈만 나갑니더.`; } },
       { label: '이번엔 넘어갑니다', hint: '현금을 지킨다',
         fx: ['+현금 지킴', '−이 물량은 못 받는다'],
-        apply: () => '증설은 미뤘습니다. 그 물량은 다른 데로 갑니다.' },
+        apply: () => '증설은 접었심더. 그 물량은 딴 데로 갈 겁니더.' },
     ],
   };
 }
@@ -868,17 +1105,34 @@ function perfPanel(s) {
   row('해상 미착', 'bal', r => stockOf(r).sea, tt);
   row('본사 생산 중', 'bal', r => stockOf(r).prod, tt);
   row('재고량 (현물 + 미착)', 'bal', r => stockOf(r).inv, tt, { cls: 'tot' });
-  row('재고율', 'bal', r => stockOf(r).invM, mo, { note: '재고량 ÷ 향후 3개월 내시 평균' });
+  row('재고율', 'bal', r => stockOf(r).invM, mo, { note: '재고량 ÷ 앞으로 3개월 월평균 소재 소요량' });
   row('재원량 (재고 + 생산 중)', 'bal', r => stockOf(r).res, tt, { cls: 'tot' });
-  row('재원율', 'bal', r => stockOf(r).resM, mo, { note: '재원량 ÷ 향후 3개월 내시 평균' });
+  row('재원율', 'bal', r => stockOf(r).resM, mo, { note: '재원량 ÷ 앞으로 3개월 월평균 소재 소요량' });
   row('장기재고 (3개월 초과)', 'bal', r => (r.bs || {}).longTons || 0, tt, { inv: true });
 
-  sec('자금 (월말 · 천달러)');
+  /* 순운전자본은 분해해서 보여준다. "돈이 어디 있나" 같은 말랑한 표현 대신
+     회계 그대로 — 매출채권 + 재고자산 − 매입채무 = 순운전자본.
+     이 숫자가 곧 은행에서 빌려야 하는 돈이다. */
+  sec('순운전자본 (월말 · 천달러)');
+  row('매출채권', 'bal', r => (r.bs || {}).ar || 0, K, { note: '고객에게서 받을 소재·가공 대금' });
+  row('└ 지연채권', 'bal', r => (r.bs || {}).arDelayed || 0, K, { inv: true, cls: 'sub' });
+  row('재고자산 (창고 현물)', 'bal', r => (r.bs || {}).invValue || 0, K, { note: '소재와 가공제품의 장부가' });
+  row('매입채무', 'bal', r => -((r.bs || {}).ap || 0), K, { note: '본사에 줄 소재값. 유산스 60일이라 아직 안 나간 돈' });
+  row('순운전자본', 'bal', r => (r.bs || {}).nwc || 0, K,
+      { cls: 'tot', note: '매출채권 + 재고자산 − 매입채무. 이 돈을 은행에서 빌려 댄다' });
+  row('(참고) 해상 미착 금액', 'bal', r => (r.bs || {}).seaValue || 0, K,
+      { cls: 'sub', note: '배 위에 있는 소재값. 도착해야 매입채무로 잡히므로 위 계산에는 안 들어간다' });
+
+  sec('차입 (월말 · 천달러)');
   row('현금', 'bal', r => (r.bs || {}).cash || 0, K);
-  row('매출채권', 'bal', r => (r.bs || {}).ar || 0, K);
-  row('지연채권', 'bal', r => (r.bs || {}).arDelayed || 0, K, { inv: true });
   row('차입금', 'bal', r => (r.bs || {}).debt || 0, K, { inv: true });
-  row('순운전자본', 'bal', r => (r.bs || {}).nwc || 0, K);
+  row('은행 한도', 'bal', r => (r.bs || {}).debtLimit || 0, K,
+      { note: '재고·매출채권 70% + 토지·건물 60% + 본사 지급보증' });
+  row('남은 여력', 'bal', r => (r.bs || {}).debtRoom || 0, K, { cls: 'tot' });
+  row('한도 소진율', 'bal', r => (r.bs || {}).debtUse || 0, pc,
+      { inv: true, note: '차입금 ÷ 은행 한도. 100%에서 더 필요해지면 부도다' });
+  row('이자비용', 'flow', r => r.interest, K, { inv: true });
+  row('자기자본', 'bal', r => (r.bs || {}).equity || 0, K);
 
   // 기준이 되는 기간들
   let title, heads, cell;
@@ -925,6 +1179,8 @@ function perfPanel(s) {
 }
 
 /* 부임 첫 달 — 관리부장이 작년 실적을 브리핑한다 */
+const legacyTons = s => Math.round(s.invRaw.filter(l => l.legacy).reduce((a, l) => a + l.qty, 0));
+
 function takeoverBrief(s) {
   const P = s.prelude || [];
   if (!P.length) return '';
@@ -937,7 +1193,7 @@ function takeoverBrief(s) {
   const K1 = v => (v < 0 ? '−$' : '$') + fmt(Math.abs(v) / 1000) + 'k';
   const lines = s.lines.map(l => `${CFG.LINE[l.type].label} ${Math.round((u[l.type] || 0) * 100)}%`).join(', ');
   return `<div class="card brief-take">
-    <div class="say"><div class="face">${face('han')}</div><div class="bubble">
+    <div class="say"><div class="face">${face('han')}</div><div class="bubble says">
       <span class="who">${CAST.han.name} · ${CAST.han.role}</span>
       사장님, 부임을 환영합니다. 작년 실적부터 보고드리겠습니다.<br><br>
       작년 판매는 <b>${fmt(tons)}톤</b>, 매출 <b>${M1(Y.revenue)}</b>, 영업이익 <b>${K1(Y.op)}</b>,
@@ -946,9 +1202,15 @@ function takeoverBrief(s) {
       ${cname(ks[0])} ${Math.round((ct[ks[0]] || 0) / tons * 100)}%, 그다음이 ${cname(ks[1])} ${Math.round((ct[ks[1]] || 0) / tons * 100)}%입니다.
       설비는 작년 평균 ${lines}로 돌았습니다.<br><br>
       지금 창고와 바다 위에 <b>${fmt(st.inv)}톤(${st.invM.toFixed(1)}개월치)</b>, 본사에서 생산 중인 것까지 합치면
-      <b>${fmt(st.res)}톤(${st.resM.toFixed(1)}개월치)</b>입니다. 은행 빚은 ${M1(s.debt.principal)}입니다.<br><br>
-      짚어드릴 게 두 가지 있습니다. 전임 사장님이 설비 정비를 한 번 미루셨고,
-      창고 구석에 규격이 애매한 일반재 2,400톤이 다섯 달째 묵어 있습니다.</div></div>
+      <b>${fmt(st.res)}톤(${st.resM.toFixed(1)}개월치)</b>입니다.<br><br>
+      자금 구조부터 말씀드리면, 자본금은 <b>${M1(s.paidIn)}</b>이고 나머지는 전부 은행 돈입니다.
+      지금 차입금이 <b>${M1(s.debt.principal)}</b>, 한도가 ${M1(s.debt.limit)}이니 ${Math.round(100 * s.debt.principal / Math.max(1, s.debt.limit))}%를 쓰고 있습니다.
+      금리는 연 ${((s.debt.rate ?? 0.03) * 100).toFixed(0)}%입니다.
+      한도는 재고와 매출채권에 붙어 있어서, 장사가 줄면 한도도 같이 줍니다. 그게 제일 무섭습니다.<br><br>
+      짚어드릴 게 세 가지 있습니다. 전임 사장님이 설비 정비를 한 번 미루셨고,
+      창고 구석에 규격이 애매한 일반재 ${fmt(legacyTons(s))}톤이 묵어 있습니다.
+      그리고 고객 단가가 해마다 조금씩 깎여서 지금 평균 톤당 <b>$${Math.round(G && G.W ? standingCut(s, G.W) : 0)}</b>가 나가 있습니다.
+      영업이익이 안 남는 이유가 대부분 여기 있습니다.</div></div>
   </div>`;
 }
 
@@ -1063,7 +1325,11 @@ function advance() {
 
     /* 증설·본사 지시·고객 영업은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
        발주와 가동은 석 달 내내 그 방침대로 돈다. */
-    const ui = i === 0 ? G.ui : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null };
+    /* 속성 모드는 한 번 결재로 석 달을 돈다. 증설·본사 지시·고객군 영업은 분기 첫 달에만 집행하고,
+       소재 발주는 사장이 적은 톤수를 첫 달에만 건다 — 둘째·셋째 달은 그 방침대로 자동으로 건다.
+       안 그러면 적어낸 톤수가 석 달 내내 세 번 나가 재고가 세 배로 쌓인다. */
+    const ui = i === 0 ? G.ui
+             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, orderTon: null, orderBy: null };
     worldPre(s, G.W);                       // 설비·품질이 이번 달 캐파와 수율을 정한다
     const res = resolveTurn(s, buildDecision(s, ui));
     worldPost(res.state, G.W, res.report, G); // 결과가 설비·관계·피로를 움직이고, 다음 사건을 부른다
@@ -1085,7 +1351,7 @@ function advance() {
 
   G.resultLines = [];
   G.turnDiscount = 0;
-  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null });
+  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null, orderTon: null, orderBy: null });
   showReport(mergeReports(reports));
 }
 
@@ -1132,6 +1398,8 @@ function showReport(R) {
 function renderEnd() {
   const g = grade(G.s, (G.diff || DIFF.normal).target), s = G.s, W = G.W;
   const P = companyProfile(s, W), m = P.m;
+  /* 판이 끝났으니 저장을 지우고 기록을 남긴다. 한 판을 두 번 적지 않게 표시를 달아둔다. */
+  if (!G.recorded) { G.recorded = true; clearSave(); recordRun(s, W, G.diff || DIFF.normal, g, P); }
   const k = v => (v < 0 ? '−$' : '$') + fmt(Math.abs(v) / 1000) + 'k';
   const styleBars = Object.keys(STYLE_NAME).map(key => {
     const tot = Object.values(W.style).reduce((a, b) => a + b, 0) || 1;
@@ -1196,8 +1464,12 @@ function renderEnd() {
         ${custRows}
       </div>
     </div>
-    <div class="center" style="margin-top:18px"><button class="primary" id="again">다시 하기</button></div>`;
+    <div class="center" style="margin-top:18px">
+      <button class="primary" id="again">다시 하기</button>
+      <button class="mini" id="end-csv" style="margin-left:8px">기록 내려받기 (CSV)</button>
+    </div>`;
   $('#again').onclick = () => { G = null; render(); };
+  $('#end-csv').onclick = exportHall;
 }
 
-render();
+/* save.js가 뒤에 붙는다. 거기서 render()를 부른다 — 설치 안내와 저장 목록이 첫 화면에 필요하다. */

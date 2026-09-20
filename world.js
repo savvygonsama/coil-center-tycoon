@@ -46,8 +46,12 @@ function initWorld(s, diff) {
     quality: hard ? 69 : 74,
     fatigue: 0,
     rel:     { JP: 68, EU: hard ? 50 : 62, CN: 55, PART: 58, HOME: 60 },
-    cut:     { JP: 0, EU: 0, CN: 0, PART: 0, HOME: 0 },   // 고객별로 깎아준 단가 ($/t). 계약이 살아 있는 한 남는다
-    concede: { JP: 0, EU: 0, CN: 0, PART: 0, HOME: 0 },   // 양보한 횟수. 한 번 깎아주면 또 온다
+    /* 고객별로 깎아준 단가 ($/t). 계약이 살아 있는 한 남는다.
+       전임 사장이 물량을 지키려고 조금씩 내준 게 남아 있다. 가공마진이 톤당 $40인
+       장사라 이 몇 달러가 그대로 영업이익이다. 매년 1월 단가 재협상에서 절반으로 준다. */
+    cut:     hard ? { JP: 7, EU: 7, CN: 3, PART: 5, HOME: 4 }
+                  : { JP: 5, EU: 4, CN: 2, PART: 3, HOME: 2 },
+    concede: { JP: 1, EU: 1, CN: 0, PART: 1, HOME: 0 },   // 양보한 횟수. 한 번 깎아주면 또 온다
     relHigh: { JP: 0, EU: 0, CN: 0, PART: 0, HOME: 0 },
     threat: {},                   // 이번 달 경쟁사가 실제로 들어간 고객 (숨김)
     comp: 35,                     // 경쟁사 공격성 (숨김)
@@ -67,11 +71,28 @@ function initWorld(s, diff) {
   return W;
 }
 
-/* 전임 사장이 남긴 것 — 1년차 "정상화"가 무엇을 정상화하는지 */
-function applyLegacy(s) {
-  // 전임자가 따로 들여온 일반재. 값은 이미 치렀다 (작년 현금흐름에 들어 있다)
-  const t = 2400, cost = CFG.P_M_BASE * 1.06;
-  s.invRaw.push({ qty: t, unitCost: cost, arrivalTurn: -5, dt: 'SPOT', gr: 'COMMON' });
+/* 전임 사장이 남긴 것 — 1년차 "정상화"가 무엇을 정상화하는지
+   전임자가 따로 들여온 일반재. 값은 이미 치렀지만(작년 현금흐름), 소재값만큼
+   은행 빚이 남아 있고 그 이자는 새 사장이 문다.
+   하드는 이게 1만 톤이다. 한 방에 폐기되지는 않지만 매달 갉아먹히고, 넉 달이 지나면
+   은행 담보에서도 빠진다. 털든 본사에 떠넘기든 섞어 팔든 사장이 정해야 한다. */
+function applyLegacy(s, diff) {
+  const hard = diff && diff.key === 'hard';
+  const t = (diff && diff.legacy) || 2400;
+  const cost = CFG.P_M_BASE * 1.06;
+  // 하드는 물량이 커서 한 달 만에 못 뺀다. 그만큼 여유를 주되 시계는 이미 돌고 있다.
+  const arrivalTurn = hard ? -2 : -5;
+  s.invRaw.push({ qty: t, unitCost: cost, arrivalTurn, dt: 'SPOT', gr: 'COMMON', legacy: true });
+  // 이미 치른 값은 전임자가 은행에서 빌려 치렀다 — 그 빚은 그대로 넘어온다
+  s.debt.principal += t * cost;
+  s.debt.limit = creditLimit(s, s.market.pm);
+  // 이 lot은 작년 말에도 창고에 있었다. 작년 실적표의 장기재고에도 그렇게 잡아준다.
+  const last = (s.prelude || [])[s.prelude.length - 1];
+  if (last && last.bs) {
+    last.bs.longTons = (last.bs.longTons || 0) + t;
+    last.bs.longValue = (last.bs.longValue || 0) + t * cost;
+    last.bs.debt = s.debt.principal;
+  }
 }
 
 /* ============================================================
@@ -82,21 +103,37 @@ function remember(W, s, tag, label, extra = {}) {
 }
 function styleAdd(W, key, n = 1) { if (key) W.style[key] = (W.style[key] || 0) + n; }
 
-/* 지금 터진 일의 원인이 될 만한 과거 결정을 찾는다 */
+/* 지금 터진 일의 원인이 될 만한 과거 결정을 찾는다.
+   causeRef는 원본 기록을 그대로 돌려준다 — 언제 무슨 결정을 했는지 화면에 못 박기 위해서다.
+   cause는 그걸 문장으로 바꾼 것. 둘 다 같은 기록을 본다. */
+function causeRef(W, s, tags, cust) {
+  return [...W.mem].reverse().find(m =>
+    s.turn - m.turn <= 8 && tags.some(t => m.tag === t) && (!cust || !m.cust || m.cust === cust)) || null;
+}
 function cause(W, s, tags, cust) {
-  const hit = [...W.mem].reverse().find(m =>
-    s.turn - m.turn <= 8 && tags.some(t => m.tag === t) && (!cust || !m.cust || m.cust === cust));
+  const hit = causeRef(W, s, tags, cust);
   return hit ? `${ago(s.turn - hit.turn)} ${hit.label}` : null;
+}
+/* 결과 화면에 그릴 인과 고리 — "2026년 3월 정비 연기 → 지금 1호 라인 고장" */
+function chainOf(W, s, tags, cust) {
+  const hit = causeRef(W, s, tags, cust);
+  if (!hit) return null;
+  const gap = s.turn - hit.turn;
+  return { turn: hit.turn, date: dateLabel(hit.turn), label: hit.label, gap, ago: ago(gap) };
 }
 
 /* 이번 달 여파 — 결산 화면과 다음 달 브리핑에 뜬다 */
-function fire(W, s, kind, text, why) {
-  W.fired.push({ turn: s.turn, kind, text, why });
+function fire(W, s, kind, text, why, chain) {
+  W.fired.push({ turn: s.turn, kind, text, why, chain });
 }
 
 /* 결정이 무엇을 움직였는지 — 결산 뒤 "지난달 결정의 영향"으로 풀어서 보여준다 */
 function lever(G, label, o) {
   G.W.impacts.push({ label, ...o });
+  /* ⚠로 붙여줬던 것 — 지금은 아무 일도 안 일어나지만 몇 달 뒤에 청구서가 된다.
+     따로 기억해두고 "아직 안 온 청구서" 칸에 계속 띄운다.
+     tag가 'risk'라 cause()의 원인 탐색에는 안 걸린다. 기록용이다. */
+  if (o && o.risk) G.W.mem.push({ turn: G.s.turn, tag: 'risk', label, risk: o.risk });
 }
 
 /* 한 고객의 물량을 키운다. 회사 전체 물량은 그 고객 비중만큼만 늘어난다. */
@@ -124,22 +161,41 @@ function topCust(s) {
 }
 function standingCut(s, W) {
   let c = 0;
-  // 한 고객에 톤당 $30 넘게 깎아주는 계약은 본사가 승인하지 않는다
-  for (const k in CUST) { W.cut[k] = Math.min(30, W.cut[k] || 0); c += (s.custShare[k] || 0) * W.cut[k]; }
+  // 한 고객에 톤당 $12 넘게 깎아주는 계약은 본사가 승인하지 않는다.
+  // 가공마진 자체가 톤당 $40이라, 이 선을 넘으면 팔수록 손해가 된다.
+  for (const k in CUST) { W.cut[k] = Math.min(12, W.cut[k] || 0); c += (s.custShare[k] || 0) * W.cut[k]; }
   return c;
 }
 /* 지금 시점의 재고·재원 (결재 직전 기준)
    이번 달에 도착하는 배는 지금 바다 위에 있다. 그 뒤로 오는 건 아직 본사 공장에 있다. */
+/* 발주한 물량이 지금 어디 있는가 — 온 화면이 같은 정의를 써야 한다.
+     해상 미착   이번 달에 도착한다. 이미 선적돼서 배 위에 있거나 항구에 닿았다.
+     본사 생산 중 다음 달 이후 도착. 아직 본사 공장 안에 있다.
+   해송이 한 달이니, 이번 달 도착분이 곧 지난달에 B/L이 끊긴 물량이다.
+   엔진이 월말 리포트에 넣는 stock과 같은 기준이다 (engine.js report.stock). */
+function seaTons(s)  { return s.poOpen.filter(p => p.etaTurn <= s.turn).reduce((a, p) => a + p.qty, 0); }
+function prodTons(s) { return s.poOpen.filter(p => p.etaTurn >  s.turn).reduce((a, p) => a + p.qty, 0); }
+
 function stockNow(s) {
-  const sea = s.poOpen.filter(p => p.etaTurn <= s.turn).reduce((a, p) => a + p.qty, 0);
-  const prod = s.poOpen.filter(p => p.etaTurn > s.turn).reduce((a, p) => a + p.qty, 0);
-  const ns = s.nasi.slice(0, 3);
-  const d = Math.max(1, ns.reduce((a, n) => a + Object.values(n.tons).reduce((x, y) => x + y, 0), 0) / Math.max(1, ns.length));
+  const sea = seaTons(s);
+  const prod = prodTons(s);
+  /* 분모는 "앞으로 실제로 쓸 소재 톤"이다. 내시 톤수가 아니라 look().need —
+     내시가 캐파를 넘으면 넘는 만큼은 어차피 못 쓰고, 가공 로스만큼은 더 쓴다.
+     고객군별 발주 화면과 같은 분모를 써야 두 화면의 재고율이 어긋나지 않는다. */
+  const d = Math.max(1, look(s).need);
   const inv = inventoryTons(s) + sea, res = inv + prod;
   return { inv, res, invM: inv / d, resM: res / d, sea, prod };
 }
-/* 재고율 — (창고 현물 + 해상 미착) ÷ 향후 3개월 내시 평균 */
+/* 재고율 — (창고 현물 + 해상 미착) ÷ 향후 3개월 내시 평균
+   이 한 줄이 온 화면의 기준이다. 아래 네 단계도 한 군데서만 정한다 —
+   경고와 안건과 부장 보고가 서로 다른 선을 쓰면 플레이어는 뭘 믿어야 할지 모른다. */
 function coverOf(s) { return stockNow(s).invM; }
+const COVER = {
+  crisis: 1.3,   // 안건이 올라온다 — 결품이 눈앞이다
+  warn:   1.8,   // 경고가 뜬다
+  ok:     2.0,   // 여기부터 3.4까지가 표준
+  heavy:  3.4,   // 너무 깔고 앉았다
+};
 /* 통장과 은행 한도로 몇 달을 버티나 */
 function runway(s) {
   const L = look(s);
@@ -192,7 +248,8 @@ function worldPost(s, W, R, G) {
     // 같은 결품이 매달 이어지면 청구서는 한 번만 — 관계 손상은 매달 쌓인다
     if (s.turn - (W.shortFired ?? -99) > 2) { W.shortFired = s.turn;
     fire(W, s, 'short', `납기를 못 맞췄습니다. ${cname(order[0])}와 ${cname(order[1])}가 불만을 표시했습니다.`,
-      cause(W, s, ['underbuy', 'volume', 'project', 'breakdown', 'policy-tight'])); }
+      cause(W, s, ['underbuy', 'volume', 'project', 'breakdown', 'policy-tight']),
+      chainOf(W, s, ['underbuy', 'volume', 'project', 'breakdown', 'policy-tight'])); }
   }
 
   // 5. 관계 — 품질이 스며들고, 평소엔 보통으로 돌아가려 하고, 약한 고리는 경쟁사가 판다
@@ -213,7 +270,8 @@ function worldPost(s, W, R, G) {
       W.churnAt[k] = s.turn;
       s.custShare[k] = sh * 0.92; s.myShare *= 0.99; W.stats.churn++;
       fire(W, s, 'churn', `${cname(k)} 물량 일부가 경쟁사로 넘어갔습니다.`,
-        cause(W, s, ['hold', 'deny', 'claim', 'short'], k));
+        cause(W, s, ['hold', 'deny', 'claim', 'short'], k),
+        chainOf(W, s, ['hold', 'deny', 'claim', 'short'], k));
     } else if (W.rel[k] > 80) s.myShare *= 1.003;
   }
   normalizeShare(s);
@@ -360,8 +418,8 @@ function briefing(s, W) {
   const sn = stockNow(s);
   if (W.priceRumor === 1) say('jung', '소문', `본사 영업팀 동기 얘기로는 다음 분기에 소재값을 올린답니다. 확정은 아니고요.`, 6);
   else if (W.priceRumor === -1) say('jung', '소문', `본사 재고가 많이 쌓였답니다. 다음 분기엔 값이 내려갈 수도 있다는데, 반쯤은 소문입니다.`, 6);
-  if (cov < 1.5) say('jung', '확인', `재고율이 ${cov.toFixed(1)}개월밖에 안 됩니다. 본사에서 생산 중인 것까지 쳐도 ${sn.resM.toFixed(1)}개월이라, 결품 날까 봐 조마조마합니다.`, 9);
-  else if (cov > 3.4) say('jung', '확인', `재고율 ${cov.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월입니다. 영업 입장에선 든든한데 한 부장님 표정이 안 좋습니다.`, 6);
+  if (cov < COVER.warn) say('jung', '확인', `재고율이 ${cov.toFixed(1)}개월밖에 안 됩니다. 본사에서 생산 중인 것까지 쳐도 ${sn.resM.toFixed(1)}개월이라, 결품 날까 봐 조마조마합니다.`, 9);
+  else if (cov > COVER.heavy) say('jung', '확인', `재고율 ${cov.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월입니다. 영업 입장에선 든든한데 한 부장님 표정이 안 좋습니다.`, 6);
 
   // 자재 — 서 대리. 비품·포장재·MRO. 현장이 잘 안 보는 것들을 본다.
   if (W.spares === false && W.equip < 60) say('seo', '확인', `베어링이랑 유압호스 예비품이 바닥이에요… 설비가 서면 부품 오는 데 열흘은 걸립니다.`, 7);
@@ -416,7 +474,8 @@ function warnings(s, W) {
   if (W.equip < 50) out.push(['설비', `설비 상태 ${equipLabel(W.equip)}. 마지막 정비 후 ${W.maintAge}개월째입니다.`]);
   const c = W.coverHist.slice(-3);
   if (c.length === 3 && c[2] > c[0] + 0.5 && c[2] > 3.2) out.push(['재무', '소재 재고가 빠르게 늘고 있습니다. 현금이 창고에 묶이고 있습니다.']);
-  if (coverOf(s) < 2.3 && s.turn > 3) out.push(['구매', '석 달 뒤 소재가 모자랄 수 있습니다. 결품이면 큰 고객부터 등을 돌립니다.']);
+  if (coverOf(s) < COVER.warn && s.turn > 3)
+    out.push(['구매', `재고율이 ${coverOf(s).toFixed(1)}개월입니다. 석 달 뒤 소재가 모자랍니다. 결품이면 큰 고객부터 등을 돌립니다.`]);
   for (const k in CUST) {
     const h = W.shareHist[k].slice(-4);
     if (h.length === 4 && h[3] < h[0] * 0.88 && (s.custShare[k] || 0) > 0.06)
@@ -426,6 +485,12 @@ function warnings(s, W) {
   if (W.fatigue > 55) out.push(['조직', '현장이 한계입니다. 사람이 나가기 시작하면 캐파가 빠집니다.']);
   const r = runway(s);
   if (r < 1.3) out.push(['현금', `현금과 한도로 ${r.toFixed(1)}개월치입니다.`]);
+  /* 자본금이 얇은 회사라 은행 한도가 목줄이다. 한도가 차기 전에 미리 말해준다.
+     한도는 재고·매출채권을 따라 움직이므로, 물량이 빠지는 달에 같이 줄어든다. */
+  const use = s.debt.limit > 0 ? s.debt.principal / s.debt.limit : 0;
+  if (use > 0.85) out.push(['자금', `은행 한도의 ${Math.round(use * 100)}%를 쓰고 있습니다. 남은 여력 $${Math.round((s.debt.limit - s.debt.principal) / 1000).toLocaleString()}k.`]);
+  if (s.equity < s.paidIn * 0.4)
+    out.push(['자본', `자기자본이 자본금의 ${Math.round(100 * s.equity / s.paidIn)}%까지 줄었습니다. 이대로면 본사가 증자를 논의하게 됩니다.`]);
   const tk = topCust(s);
   if ((s.custShare[tk] || 0) > 0.48) out.push(['고객', `${cname(tk)} 의존도 ${Math.round(s.custShare[tk] * 100)}%. 가격 협상력이 약해집니다.`]);
   if (W.hq.target > 0) {
@@ -508,11 +573,16 @@ function runPrelude(s, months = 16) {
   const gameScenario = s.scenario, gamePhase = s.market.phase;
   s.scenario = [{ phase: 'NORMAL', drift: 0, to: 9999, name: '통상', label: '전임 사장 시절', brief: '' }];
   s.market.phase = 'NORMAL';
-  const ui = { cover: 2.2, hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null };
+  const ui = { cover: 2.9, hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null };
   const reps = [];
   for (let i = 0; i < months && !s.over; i++) {
     const r = resolveTurn(s, buildDecision(s, ui));
     s = r.state; reps.push(r.report);
+    /* 전임 사장이 16개월을 그냥 굴리면 사기가 20대까지 떨어진다. 그건 이 시뮬레이션이
+       사람 관리 결재를 한 번도 안 넣어서 생기는 것이지, 실제로 그런 회사를 넘겨받는 건 아니다.
+       사기가 떨어지면 수율이 같이 떨어져서 "작년 실적"이 실제보다 나쁘게 잡힌다.
+       그래서 프렐류드 동안은 사기를 사람이 다니는 회사 수준으로 붙잡아 둔다. */
+    s.morale = Math.min(72, Math.max(62, s.morale));
   }
   // 날짜를 다시 맞춘다 — 넘겨받는 달이 1턴(2026년 1월)이 되도록
   const off = s.turn - 1, sh = t => t - off;

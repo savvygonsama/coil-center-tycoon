@@ -1,7 +1,19 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>코일센터 경영 시뮬레이터</title>
+<title>코일센터의 제왕 — 로드 오브 코일센터</title>
+<meta name="description" content="해외 코일센터 사장으로 4년을 경영하는 시뮬레이션. 주재원·수출영업 교육용.">
+
+<!-- 휴대폰에 앱으로 깔린다. manifest와 sw.js는 index.html 옆에 같이 올라간다.
+     파일 하나만 받아서 더블클릭해도 게임은 그대로 돈다 — 그때는 설치 기능만 안 뜬다. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1e5f8c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="코일센터의 제왕">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
 
 <!-- 본문은 Pretendard, 숫자와 제목은 픽셀 폰트 Galmuri.
      인터넷이 없으면 아래 fallback으로 내려간다. 게임은 그대로 돈다. -->
@@ -75,6 +87,83 @@
     clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%)}
   .bubble .who{font-size:12.5px;color:var(--dim);display:block;margin-bottom:2px;font-weight:800;
     letter-spacing:.02em}
+
+  /* 첫 화면 크레딧 */
+  .byline{text-align:center;margin:-8px 0 2px;font-size:14px;color:var(--dim);letter-spacing:-.01em}
+  .byline b{color:var(--blue)}
+  .thanks{text-align:center;margin:0 0 16px;font-size:12px;color:var(--dim);
+    letter-spacing:.02em;opacity:.85}
+
+  /* 이어하기 · 설치 안내 · 명예의 전당 */
+  .records{border-color:var(--ink)}
+  .resume{border-color:var(--blue);box-shadow:5px 5px 0 var(--blue-l)}
+  .install.done{opacity:.8}
+  .install .steps{margin:8px 0 6px;padding-left:20px;font-size:14px;line-height:1.85}
+  .install .steps b{color:var(--blue)}
+  .hbtns{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .rectbl{overflow-x:auto;margin-top:8px}
+  .rectbl table{width:100%;border-collapse:collapse;font-size:13px}
+  .rectbl th{background:var(--blue);color:#fff;padding:6px 7px;font-size:11.5px;font-weight:800;
+    border:1px solid var(--ink);white-space:nowrap}
+  .rectbl td{padding:6px 7px;border:1px solid var(--line);white-space:nowrap;
+    font-variant-numeric:tabular-nums;text-align:right}
+  .rectbl td.hname,.rectbl td.hstyle{text-align:left;font-weight:700}
+  .rectbl td.hgrade{font-weight:900;color:var(--blue);text-align:center}
+  .rectbl td.dn{color:var(--rust);font-weight:800}
+  .savebtn{margin-left:auto}
+
+  /* 저장 알림 */
+  #toast{position:fixed;left:50%;bottom:-70px;transform:translateX(-50%);z-index:99;
+    background:var(--ink);color:#fff;padding:11px 18px;font-size:14px;font-weight:700;
+    border:2px solid var(--ink);box-shadow:4px 4px 0 var(--shade);max-width:90vw;
+    transition:bottom .22s ease;pointer-events:none}
+  #toast.on{bottom:22px}
+
+  /* 고객군별 소재 발주 — 숫자를 직접 적는 화면 */
+  .ordwrap{padding:14px 16px 16px}
+  .ordt{width:100%;border-collapse:collapse;font-size:13px}
+  .ordt th{background:var(--blue);color:#fff;padding:6px 5px;font-weight:800;font-size:11.5px;
+    line-height:1.25;border:1px solid var(--ink);text-align:center}
+  .ordt th i{font-style:normal;font-weight:600;opacity:.8;font-size:10.5px}
+  .ordt td{padding:6px 5px;border:1px solid var(--line);text-align:right;
+    font-variant-numeric:tabular-nums}
+  .ordt td.oname{text-align:left;font-weight:800;white-space:nowrap}
+  .ordt td.oname i{font-style:normal;font-weight:600;color:var(--dim);font-size:11px;display:block}
+  .ordt td.dn{color:var(--rust);font-weight:800}
+  .ordt td.oaf{font-weight:800;background:var(--blue-l)}
+  .ordt input{width:84px;padding:5px 6px;border:2px solid var(--ink);background:var(--panel);
+    color:var(--ink);font:inherit;font-weight:800;text-align:right;
+    font-variant-numeric:tabular-nums}
+  .ordbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;
+    margin:12px 0 4px;padding:9px 11px;background:var(--panel2);border:2px solid var(--ink)}
+  .osum{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;font-size:14px}
+  .osum b{font-size:17px}
+  .osum .up{color:var(--teal);font-weight:800}
+  .osum .dn{color:var(--rust);font-weight:800}
+  .obtns{display:flex;gap:6px;flex-wrap:wrap}
+  button.mini{padding:5px 10px;font-size:12px;font-weight:800;border:2px solid var(--ink);
+    background:var(--panel);color:var(--ink);cursor:pointer}
+  button.mini:hover{background:var(--blue);color:#fff}
+  @media(max-width:560px){
+    .ordwrap{padding:10px 8px 12px}
+    .ordt{font-size:11.5px}
+    .ordt th{font-size:10px;padding:4px 2px}
+    .ordt td{padding:4px 2px}
+    .ordt input{width:62px;padding:4px}
+  }
+
+  /* 인과 고리 — 그때 그 결정 → 몇 달 뒤 → 지금 */
+  .chain{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-bottom:7px;font-size:13px}
+  .c-then{background:var(--panel2);border:2px solid var(--ink);padding:3px 9px;font-weight:700}
+  .c-then i{display:block;font-style:normal;font-size:11px;color:var(--dim);font-weight:800;
+    letter-spacing:.02em}
+  .c-arrow{color:var(--blue);font-weight:800;letter-spacing:-.01em}
+  .c-now{background:var(--blue);color:#fff;padding:3px 9px;font-weight:800;border:2px solid var(--ink)}
+
+  /* 사람이 실제로 하는 말에는 따옴표를 붙인다. 보고서가 아니라 대사로 읽히게. */
+  .says::before{content:'“';color:var(--blue);font-weight:800;margin-right:1px}
+  .says::after{content:'”';color:var(--blue);font-weight:800;margin-left:1px}
+  .bubble.says::before,.bubble.says::after{font-size:1.1em;line-height:0}
 
   /* ---------- 조작 ---------- */
   label.row{display:block;margin:16px 0 0}

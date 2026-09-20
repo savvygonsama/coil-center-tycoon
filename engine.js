@@ -7,7 +7,7 @@
 /* ---------- 설정 ---------- */
 
 const CFG = {
-  // 판매 유형별 마진·수율 (v3 §1-2)
+  // 판매 유형별 마진·수율 (v3 §1-2) — 역산 확정값. 건드리지 않는다.
   COIL_MARGIN: 10,                                    // 전 유형 공통
   PROC_MARGIN: { C2C: 0, SLIT: 30, LEVEL: 30, TRAP: 45, DIE: 75 },
   YIELD:       { C2C: 1.00, SLIT: 0.98, LEVEL: 0.98, TRAP: 0.98, DIE: 0.85 },
@@ -39,14 +39,22 @@ const CFG = {
   PM_SIGMA: 0.025,               // 월 변동성. 시나리오 사이클이 주인공이고 잡음은 거들기만 한다
   PM_JUMP_PROB: 0.04,
   PM_JUMP_SIZE: 0.18,
-  /* 리드타임 분해 (실무자 확인): 주문접수 후 제조 2개월 + 해송 1개월 = 3개월.
-     3개월치 안전재고라는 업계 통설은 여기서 나온다. */
-  LEAD_TURNS: 3,
-  /* L/C 유산스 90일은 B/L(선적) 기준이다. 선적하고 한 달 배를 타고 오니
-     도착 시점엔 이미 두 달이 지나 있다. 결제는 도착 한 달 뒤다.
-     이걸 도착 기준 90일로 잡으면 본사가 두 달치를 공짜로 대주는 게 되어
-     코일센터가 현금이 넘치는 이상한 회사가 된다. */
-  DPO_TURNS: 1,
+  /* 리드타임 — 발주한 날부터 야드에 내리는 날까지.
+     내시를 석 달 앞까지 받아 본사 압연 스케줄에 미리 걸어두기 때문에(NASI_LEAD 3),
+     실제 발주가 확정되는 시점부터 도착까지는 짧다. 압연 대기까지 전부 리드타임으로
+     잡으면 본사 공장 안에 석 달치가 서 있는 이상한 회사가 된다.
+       일반재     해송 1개월 (근거리·유통재라 압연을 기다리지 않는다)
+       자동차강판 제조 1개월 + 해송 1개월 = 2개월 (leadAdd +1)
+     실무 기준: 어느 시점에나 창고 현물 2~3개월, 해상 미착 2주~1개월,
+     본사 생산 중 1~1.5개월. 이 세 숫자가 나오도록 리드타임을 맞췄다. */
+  LEAD_TURNS: 1,
+  /* L/C 유산스 90일은 B/L(선적) 기준이다. 제조가 끝나고 실려서 한 달 배를 타고 오니,
+     도착한 날 기준으로는 아직 두 달이 남아 있다. 그래서 결제는 도착 두 달 뒤다.
+     이걸 도착 기준 90일로 잡으면 본사가 석 달치를 공짜로 대주는 게 되어
+     코일센터가 현금이 넘치는 이상한 회사가 된다.
+     자본금이 얇은 코일센터가 돌아가는 이유가 정확히 이 유산스다.
+     받을 돈은 90일, 줄 돈은 60일 — 그 30일 차이를 은행 한도로 메운다. */
+  DPO_TURNS: 2,
   DSO_TURNS: 3,                    // Net 60 + 실제 지연
   TARGET_DIO_DAYS: 52.5,
 
@@ -104,9 +112,18 @@ const CFG = {
   OT_CAP_MULT: 1.20,
   LC_FEE_RATE: 0.002,
 
-  // 자금 [가정]
-  DEBT_RATE_MONTHLY: 0.08 / 12,
+  /* 자금 [가정]
+     자본금은 얇고 나머지는 은행 돈이다. 코일센터는 원래 그렇게 돌린다.
+     땅·건물은 시설자금 대출(담보 60%), 소재와 매출채권은 운전자금 한도(70%),
+     거기에 본사 지급보증이 자본금의 80%만큼 한도를 얹어준다.
+     회전한도라 여유 현금이 생기면 자동으로 갚힌다 — 이자는 빌린 기간만큼만 나간다. */
+  DEBT_RATE_ANNUAL: 0.03,          // 기본 금리. 난이도가 덮어쓴다 (노멀 3% / 하드 5%)
   BORROW_BASE_RATE: 0.70,          // 재고+매출채권의 70%까지 운전자본 대출이 붙는다 [가정]
+  MORTGAGE_RATE: 0.60,             // 토지·건물 장부가의 60%까지 시설자금 담보
+  HQ_GUARANTEE_RATE: 0.60,         // 본사 지급보증 — 자본금의 60%
+  HQ_GUARANTEE_TRUST: 20_000_000,  // 여기에 본사 신뢰도만큼 더 얹어준다 (신뢰 100 = +$20M)
+  CASH_BUFFER: 2_000_000,          // 통장에 이만큼만 남기고 나머지는 차입금을 갚는다
+  OPEN_CASH: 3_000_000,            // 부임 시점에 쥐고 시작하는 운영자금
 
   // 시황 국면 (v3 §5 STEP 0)
   PHASE: {
@@ -178,6 +195,7 @@ const CFG = {
   // 부실·연체 [가정]
   BAD_DEBT_RATE: 0.006 / 12,
   DELAY_RATE: 0.12,
+  LOSS_GIVEN_DEFAULT: 0.40,        // 사고 난 채권에서 실제로 떼이는 비율. 나머지는 건진다
 
   /* ---- 재고 보유의 대가 (실무자 확인 반영) ----
      현물 전략의 비용은 가격 폭락 하나가 아니다. 네 가지가 같이 붙는다.
@@ -189,7 +207,8 @@ const CFG = {
   CARRY_COST_PER_TON: 1.5,         // 보관·보험·핸들링 월 [가정]. 금리 부담은 차입 이자가 따로 받는다
   DEGRADE_FREE_TURNS: 3,           // 3개월까지는 멀쩡하다
   DEGRADE_RATE: 0.015,             // 이후 월 1.5%가 녹·백청·스크래치로 상품성 상실
-  DEGRADE_DEAD_TURNS: 7,           // 7개월 넘으면 전량 불용재고 처리
+  DEGRADE_DEAD_TURNS: 7,           // 7개월 넘으면 전량 불용재고 처리 (전임자 유산 재고는 예외)
+  DEGRADE_MAX_RATE: 0.06,          // 월 열화 상한. 유산 재고는 여기서 멈추고 계속 갉아먹힌다
   WAREHOUSE_CAP_BASE: 45000,       // 야드 수용 한도(톤)
   WAREHOUSE_OVER_COST: 9,          // 초과분 외부창고 임차 톤당 월 [가정]
   WAREHOUSE_OVER_CAP_PENALTY: 0.12,// 초과 시 물류 정체로 가동 캐파 하락
@@ -255,6 +274,29 @@ function yieldGainPerTon(pm, scrapRate, assumedYield, actualYield) {
   return pm * (1 - scrapRate) * (1 / assumedYield - 1 / actualYield);
 }
 
+/* 은행 한도 — 담보를 따라 움직인다.
+   운전자본 대출은 자본금이 아니라 재고와 매출채권에 붙는다.
+   그래서 장사가 커지면 한도도 같이 커지고, 재고를 털면 한도도 같이 줄어든다.
+   불황에 재고가 빠지는 순간 은행 한도까지 같이 빠지는 게 진짜 무서운 지점이다.
+   은행은 묵은 재고를 담보로 안 쳐준다. 넉 달 넘은 lot은 한도에서 빠진다 —
+   재고를 깔고 앉아 있으면 그 재고가 상품성을 잃는 바로 그때 한도까지 같이 빠진다.
+   땅·건물 담보는 안 흔들리는 바닥이고, 본사 지급보증은 신뢰도를 따라 움직인다.
+   본사에 미운털이 박히면 은행 한도가 먼저 줄어든다. */
+function creditLimit(s, pm) {
+  let goodTons = 0;
+  for (const pool of [s.invRaw, s.invFg])
+    for (const l of pool) {
+      const age = s.turn - (l.arrivalTurn ?? l.madeTurn ?? s.turn);
+      if (age < CFG.DUMP_AGE_TURNS) goodTons += l.qty;
+    }
+  const wc = (goodTons * pm + s.ar.reduce((a, x) => a + x.amount, 0)) * CFG.BORROW_BASE_RATE;
+  const mortgage = (s.fa.land + s.fa.buildingNbv) * CFG.MORTGAGE_RATE;
+  const guarantee = s.paidIn * CFG.HQ_GUARANTEE_RATE
+                  + CFG.HQ_GUARANTEE_TRUST * Math.max(0, s.trust) / 100;
+  // 본사 재무와 협의해서 따로 받아낸 증액분. 받아낸 뒤에도 신뢰가 떨어지면 위의 보증분이 줄어든다.
+  return wc + mortgage + guarantee + (s.debt.extra || 0);
+}
+
 /* ---------- 초기 상태 ---------- */
 
 function createInitialState(opt = {}) {
@@ -263,6 +305,11 @@ function createInitialState(opt = {}) {
   }));
   const machineCost = lines.reduce((a, l) => a + l.capex, 0);
   const equity = opt.equity ?? 25_000_000;
+  /* 자본금으로 공장값을 다 대지 못한다. 모자란 만큼은 처음부터 은행 돈이다.
+     그래서 부임하는 순간 이미 빚이 있고, 매달 이자가 나간다. */
+  const capex = CFG.INFRA_TOTAL + machineCost;
+  const openCash = opt.openCash ?? CFG.OPEN_CASH;
+  const debt0 = Math.max(0, capex + openCash - equity);
 
   // 판마다 다른 사이클. 시드가 같으면 같은 판이 나온다 (나중에 조별 대항전에서 같은 판을 돌릴 수 있게).
   const rng0 = makeRng((opt.seed ?? 12345) + 104729);
@@ -274,7 +321,7 @@ function createInitialState(opt = {}) {
     country: opt.country || 'MX',
     companyName: opt.companyName || '무제 코일센터',
 
-    cash: equity - CFG.INFRA_TOTAL - machineCost,
+    cash: equity - capex + debt0,
     invRaw: [],          // {qty, unitCost, arrivalTurn, dt}  dt = 'FIRM'|'SPOT'
     invFg: [],           // {proc, qty, unitCost, dt, ya, ra, yActual}
     poOpen: [],          // {qty, unitPriceFixed, etaTurn, dt}
@@ -283,7 +330,7 @@ function createInitialState(opt = {}) {
 
     lines,
     fa: { land: CFG.LAND, buildingNbv: CFG.BUILDING, machineCost, machineAccDep: 0 },
-    debt: { principal: 0, limit: opt.debtLimit ?? 15_000_000 },
+    debt: { principal: debt0, rate: opt.debtRate ?? CFG.DEBT_RATE_ANNUAL, limit: 0, extra: 0 },
     equity,
     paidIn: equity,
 
@@ -309,6 +356,7 @@ function createInitialState(opt = {}) {
 
   // 개업하기 전에 이미 몇 달치 내시를 받아둔다. 사장은 첫날부터 이 숫자를 보고 발주를 건다.
   for (let i = 0; i < CFG.NASI_LEAD; i++) st.nasi.push(makeNasi(st, st.turn + i, rng0));
+  st.debt.limit = creditLimit(st, st.market.pm);
   return st;
 }
 
@@ -942,9 +990,13 @@ function resolveTurn(state, decision) {
     for (const lot of pool) {
       const age = s.turn - (lot.arrivalTurn ?? lot.madeTurn ?? s.turn);
       if (age <= CFG.DEGRADE_FREE_TURNS) continue;
-      const lossRate = age >= CFG.DEGRADE_DEAD_TURNS
+      /* 전임자가 남긴 장기재고(legacy)는 여기서 한 번에 전량 폐기하지 않는다.
+         야드에 방수포 덮고 서 있는 일반재가 일곱 달째 되는 날 갑자기 0이 되지는 않는다.
+         대신 매달 갉아먹히고, 담보에서도 빠지고, 사이즈 미스매치로 반값에 털린다.
+         빨리 안 치우면 계속 아픈 구조지, 한 방에 회사가 날아가는 구조는 아니다. */
+      const lossRate = (age >= CFG.DEGRADE_DEAD_TURNS && !lot.legacy)
         ? 1.0                                   // 불용재고. 스크랩으로 처분
-        : CFG.DEGRADE_RATE * (age - CFG.DEGRADE_FREE_TURNS);
+        : Math.min(CFG.DEGRADE_MAX_RATE, CFG.DEGRADE_RATE * (age - CFG.DEGRADE_FREE_TURNS));
       const lost = lot.qty * Math.min(1, lossRate);
       if (lost <= 1e-9) continue;
       degradeTon += lost;
@@ -1017,7 +1069,7 @@ function resolveTurn(state, decision) {
                   + overTons * CFG.WAREHOUSE_OVER_COST;
   varCost += carryCost;
   const depreciation = (s.buildings || 1) * CFG.BUILDING / CFG.BUILDING_LIFE_M + s.fa.machineCost / CFG.MACHINE_LIFE_M;
-  const interest = s.debt.principal * CFG.DEBT_RATE_MONTHLY;
+  const interest = s.debt.principal * ((s.debt.rate ?? CFG.DEBT_RATE_ANNUAL) / 12);
 
   /* STEP 15. 채권 회수 */
   let cashIn = 0, badDebt = 0;
@@ -1025,8 +1077,14 @@ function resolveTurn(state, decision) {
   for (const a of s.ar) {
     if (a.dueTurn > s.turn) { arKeep.push(a); continue; }
     const r = rng();
-    // 떼일 확률은 어떤 고객을 갖췄느냐로 정해진다. 중국 전기차 비중이 크면 여기서 맞는다.
-    if (r < pfNow.bad) { badDebt += a.amount; s.trust -= 2; }
+    /* 떼일 확률은 어떤 고객을 갖췄느냐로 정해진다. 중국 전기차 비중이 크면 여기서 맞는다.
+       다만 사고가 나도 한 달치 매출이 통째로 날아가진 않는다. 부도가 나도 담보·보험·
+       채권단 배당으로 일부는 건지고, 애초에 한 달 청구서 안에 고객이 여럿이다.
+       그래서 사고 난 채권의 LOSS_GIVEN_DEFAULT만 손실로 확정하고 나머지는 들어온다. */
+    if (r < pfNow.bad) {
+      const lost = a.amount * CFG.LOSS_GIVEN_DEFAULT;
+      badDebt += lost; cashIn += a.amount - lost; s.trust -= 2;
+    }
     else if (r < pfNow.bad + CFG.DELAY_RATE) { a.dueTurn += 1; a.delayed = true; arKeep.push(a); }
     else cashIn += a.amount;
   }
@@ -1039,25 +1097,29 @@ function resolveTurn(state, decision) {
   for (const p of s.ap) { if (p.dueTurn <= s.turn) cashOut += p.amount; else apKeep.push(p); }
   s.ap = apKeep;
 
-  /* STEP 16b. 차입 한도는 담보를 따라 움직인다.
-     운전자본 대출은 자본금이 아니라 재고와 매출채권에 붙는다.
-     그래서 장사가 커지면 한도도 같이 커지고, 재고를 털면 한도도 같이 줄어든다.
-     불황에 재고가 빠지는 순간 은행 한도까지 같이 빠지는 게 진짜 무서운 지점이다. */
-  {
-    const base = inventoryTons(s) * pm + s.ar.reduce((a, x) => a + x.amount, 0);
-    s.debt.limit = Math.max(s.paidIn * 0.4, base * CFG.BORROW_BASE_RATE);
-  }
+  /* STEP 16b. 차입 한도 재산정 — creditLimit()에 설명이 있다 */
+  s.debt.limit = creditLimit(s, pm);
 
-  /* STEP 17. 현금 정산 및 부도 판정 */
+  /* STEP 17. 현금 정산 및 부도 판정
+     회전한도다. 모자라면 자동으로 끌어 쓰고, 남으면 자동으로 갚는다.
+     통장에는 CASH_BUFFER만 남긴다 — 놀리는 현금을 쌓아두고 이자를 물 이유가 없다. */
   s.cash += cashIn - cashOut - fixedCost - varCost - interest - lcFee;
-  if (s.cash < 0) {
-    const need = -s.cash;
+  if (s.cash < CFG.CASH_BUFFER) {
+    const need = CFG.CASH_BUFFER - s.cash;
     if (s.debt.principal + need <= s.debt.limit) {
-      s.debt.principal += need; s.cash = 0;
-      flags.push(`자금이 모자라 $${Math.round(need).toLocaleString()}을 차입했습니다.`);
+      const short = s.cash < 0;
+      s.debt.principal += need; s.cash = CFG.CASH_BUFFER;
+      if (short) flags.push(`자금이 모자라 $${Math.round(need).toLocaleString()}을 차입했습니다.`);
     } else {
-      s.over = true; s.overReason = 'INSOLVENT';
+      // 한도까지는 끌어 쓴다. 그러고도 통장이 마이너스면 그때가 부도다.
+      const room = Math.max(0, s.debt.limit - s.debt.principal);
+      s.debt.principal += room; s.cash += room;
+      if (s.cash < 0) { s.over = true; s.overReason = 'INSOLVENT'; }
+      else flags.push(`은행 한도가 찼습니다. 통장에 $${Math.round(s.cash / 1000).toLocaleString()}k밖에 안 남았습니다.`);
     }
+  } else if (s.debt.principal > 0) {
+    const pay = Math.min(s.debt.principal, s.cash - CFG.CASH_BUFFER);
+    if (pay > 0) { s.debt.principal -= pay; s.cash -= pay; }
   }
 
   /* STEP 18. 재무제표 */
@@ -1109,6 +1171,10 @@ function resolveTurn(state, decision) {
     longTons: aging[2].qty + aging[3].qty, longValue: aging[2].cost + aging[3].cost,   // 석 달 넘은 재고
     ar: arTotal, arDelayed: s.ar.filter(a => a.delayed).reduce((a, x) => a + x.amount, 0),
     ap: apTotal, debt: s.debt.principal, cash: s.cash,
+    seaValue: s.poOpen.filter(p => p.etaTurn <= s.turn + 1).reduce((a, p) => a + p.qty * p.unitPriceFixed, 0),
+    debtLimit: s.debt.limit, debtRoom: Math.max(0, s.debt.limit - s.debt.principal),
+    debtUse: s.debt.limit > 0 ? s.debt.principal / s.debt.limit : 0,
+    equity: s.equity, interest,
     nwc: arTotal + invValue - apTotal,
   };
 
@@ -1130,9 +1196,20 @@ function resolveTurn(state, decision) {
     // 재고·재원 — 현물(창고)·해상 미착·본사 생산 중을 나눠 둔다. 다음 달 도착하면 지금 바다 위에 있다
     stock: {
       onhand: inventoryTons(s),
-      sea:  s.poOpen.filter(p => p.etaTurn - s.turn <= 1).reduce((a, p) => a + p.qty, 0),
-      prod: s.poOpen.filter(p => p.etaTurn - s.turn > 1).reduce((a, p) => a + p.qty, 0),
-      nasi3: s.nasi.slice(0, 3).reduce((a, n) => a + Object.values(n.tons).reduce((x, y) => x + y, 0), 0) / Math.max(1, Math.min(3, s.nasi.length)),
+      sea:  s.poOpen.filter(p => p.etaTurn <= s.turn + 1).reduce((a, p) => a + p.qty, 0),
+      prod: s.poOpen.filter(p => p.etaTurn >  s.turn + 1).reduce((a, p) => a + p.qty, 0),
+      /* 재고율·재원율의 분모 — 앞으로 실제로 쓸 소재 톤.
+         내시 톤수를 그대로 쓰면 캐파를 넘는 내시가 분모를 부풀려 재고율이 낮게 나오고,
+         가공 로스를 빼먹으면 반대로 높게 나온다. 캐파로 자르고 수율로 나눈 값을 쓴다.
+         world.js stockNow()와 고객군별 발주 화면이 전부 이 분모를 쓴다. */
+      nasi3: (() => {
+        const c = capacityOf(s), ns = s.nasi.slice(0, 3), n = Math.max(1, ns.length);
+        const avg = k => ns.reduce((a, x) => a + (x.tons[k] || 0), 0) / n;
+        return Math.min(c.SLIT, avg('SLIT')) / CFG.YIELD.SLIT
+             + Math.min(c.LEVEL, avg('LEVEL')) / CFG.YIELD.LEVEL
+             + avg('C2C')
+             + Math.min(c.BLANK, avg('TRAP') + avg('DIE')) / CFG.YIELD.TRAP;
+      })(),
       fg: s.invFg.reduce((a, l) => a + l.qty, 0),
     },
     invTons: inventoryTons(s),
