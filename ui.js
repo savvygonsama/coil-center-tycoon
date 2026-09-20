@@ -274,8 +274,10 @@ function openDecisions() {
       <div class="deckq"><h2>${card.title}</h2></div>
       <div class="ordwrap">
         <table class="ordt">
-          <tr><th>고객군</th><th>월 사용<br><i>소재 기준</i></th><th>창고<br>현물</th><th>해상<br>미착</th>
-              <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th><th>발주 (톤)</th></tr>
+          <tr><th>고객군</th><th>${card.months > 1 ? '분기 사용<br><i>석 달치 · 소재' : '월 사용<br><i>소재'} 기준</i></th>
+              <th>창고<br>현물</th><th>해상<br>미착</th>
+              <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th>
+              <th>${card.months > 1 ? '분기 발주 (톤)' : '발주 (톤)'}</th></tr>
           ${rows.map(r => `<tr>
             <td class="oname">${CUST[r.k]} <i>${CFG.CUSTOMERS[r.k].name}</i></td>
             <td>${fmt(Math.round(r.use))}</td>
@@ -298,9 +300,10 @@ function openDecisions() {
         </div>
         <p class="hint">고객군별 재고는 판매 비중으로 배분한 추정치입니다. 같은 규격을 여러 고객이 쓰니
           칼같이 갈리지는 않습니다. 지금 걸면 <b>${lead}개월 뒤</b> 야드에 내립니다.<br>
-          본사 압연 스케줄 때문에 한 달에 소요량의 <b>1.6배</b>까지만 걸 수 있습니다 —
-          한 번 바닥나면 한 달 만에는 못 메웁니다.</p>
-        <button class="primary" id="osubmit">이대로 발주한다</button>
+          본사 압연 스케줄 때문에 ${card.months > 1 ? '분기' : '한 달'} 소요량의 <b>1.6배</b>까지만 걸 수 있습니다 —
+          한 번 바닥나면 금방은 못 메웁니다.
+          ${card.months > 1 ? '<br>적어주신 톤수는 석 달에 나눠서 집행합니다.' : ''}</p>
+        <button class="primary" id="osubmit">${card.months > 1 ? '이대로 분기 발주' : '이대로 발주한다'}</button>
       </div>
     </div>`;
 
@@ -414,22 +417,38 @@ function customerCard(s) {
    재고를 고객군별로 딱 갈라놓을 수는 없다 — 같은 규격을 여러 고객이 쓰니까.
    그래서 판매 비중으로 배분한 추정치를 보여준다. 실무에서도 그렇게 본다.
    ============================================================ */
+/* 한 번 결재로 몇 달을 거는가.
+   노멀은 매달 결재하니 한 달치, 속성은 분기마다 결재하니 석 달치를 한 번에 건다.
+   분기 결재인데 한 달치만 걸면 나머지 두 달은 사장이 안 본 사이에 자동으로 나가버린다.
+   그건 발주를 결정한 게 아니다. */
+function orderMonths() { return (G && G.mpt) || 1; }
+
 function orderRows(s, L) {
   const onhand = inventoryTons(s), sea = seaTons(s), prod = prodTons(s);
   const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
   const cover = (G && G.ui && G.ui.cover) || 2.9;
+  const mo = orderMonths();
   return Object.keys(CUST).map(k => {
     const sh = s.custShare[k] || 0;
-    const use = L.need * sh;                       // 소재 기준 월 소요량
+    const use = L.need * sh * mo;                  // 이번 결재가 덮는 기간의 소재 소요량
     const oh = onhand * sh, se = sea * sh, pr = prod * sh;
     const inv = oh + se, res = inv + pr;
-    /* 본사 압연 스케줄에 한 달에 밀어 넣을 수 있는 양은 한계가 있다.
+    /* 본사 압연 스케줄에 밀어 넣을 수 있는 양은 한계가 있다.
        재고가 바닥나도 한 달에 소요량의 1.6배까지만 걸린다 — 그래서 결품은
        한 번 나면 한 달 만에 못 메운다. 그게 발주를 미루면 안 되는 이유다. */
     const MAX = use * 1.6;
-    const rec = Math.min(MAX, Math.max(0, use * (lead + cover) - res));
+    /* 권장량 = 이번 기간에 쓸 양 + (목표 재원 − 지금 재원).
+       앞의 항이 소비를 메우고, 뒤의 항이 재원을 목표로 되돌린다.
+       뒤의 항을 빼먹으면 재원이 한번 어긋난 채로 계속 간다.
+       분기 결재는 use가 이미 석 달치라 앞의 항이 석 달치가 된다. */
+    const useM = use / mo;
+    /* 분기에 한 번 몰아서 걸면 재고가 톱니처럼 오르내린다. 발주 직후가 꼭대기고
+       다음 결재 직전이 바닥이다. 목표를 꼭대기에 맞추면 평균 재고가 매달 결재할 때보다
+       반 분기만큼 높아진다. 그래서 목표를 그만큼 내려 평균을 같은 자리에 둔다. */
+    const aim = lead + cover - (mo - 1) / 2;
+    const rec = Math.min(MAX, Math.max(0, use + useM * aim - res));
     return { k, sh, use, oh, sea: se, prod: pr, inv, res, max: Math.round(MAX / 50) * 50,
-      invM: use > 0 ? inv / use : 0, resM: use > 0 ? res / use : 0,
+      invM: useM > 0 ? inv / useM : 0, resM: useM > 0 ? res / useM : 0,
       rec: Math.round(rec / 50) * 50 };
   }).filter(r => r.sh > 0.01);
 }
@@ -437,12 +456,15 @@ function orderRows(s, L) {
 function orderCard(s, W, L) {
   const rows = orderRows(s, L);
   const sn = stockNow(s);
+  const mo = orderMonths();
   return {
-    id: 'op-order', who: 'jung', topic: 'order', form: 'order', rows,
-    title: '이번 달 소재 발주를 정해주십시오',
-    text: `사장님, 이번 달 발주입니다. 지금 전체로 보면 재고율 ${sn.invM.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월이고요. `
-        + `고객군별로 쓰는 속도가 다르니까 한 줄씩 보고 정하시죠. `
-        + `제가 계산한 권장량을 넣어뒀는데, 이건 어디까지나 내시가 그대로 간다는 전제입니다. `
+    id: 'op-order', who: 'jung', topic: 'order', form: 'order', rows, months: mo,
+    title: mo > 1 ? '이번 분기 소재 발주를 정해주십시오' : '이번 달 소재 발주를 정해주십시오',
+    text: `사장님, ${mo > 1 ? '이번 분기' : '이번 달'} 발주입니다. `
+        + `지금 전체로 보면 재고율 ${sn.invM.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월이고요. `
+        + `${mo > 1 ? `분기 결재니까 석 달치를 한 번에 겁니다. 적어주신 톤수를 세 달에 나눠서 집행합니다. ` : ''}`
+        + `고객군별로 쓰는 속도가 다릅니다. 한 줄씩 보고 정하시죠. `
+        + `제가 계산한 권장량을 넣어뒀는데, 이건 내시가 그대로 간다는 전제입니다. `
         + `걸면 ${CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd}개월 뒤에 들어옵니다. 그때 가서 바꾸자는 건 안 됩니다.`,
     submit: (vals, s, G) => {
       // 본사가 한 달에 받아주는 한도. 넘겨 적어도 여기서 잘린다.
@@ -461,11 +483,12 @@ function orderCard(s, W, L) {
       if (ratio > 1.25) styleAdd(W, 'grow');
       if (ratio < 0.75) styleAdd(W, 'cash');
       const detail = rows.map(r => `${CUST[r.k]} ${fmt(Math.round(vals[r.k] || 0))}t`).join(' · ');
+      const span = mo > 1 ? `석 달치 ` : '';
       return ratio > 1.25
-        ? `${fmt(Math.round(tot))}톤 걸었습니다. 권장보다 ${Math.round((ratio - 1) * 100)}% 많습니다. ${detail}. 창고는 각오하셔야 합니다.`
+        ? `${span}${fmt(Math.round(tot))}톤 걸었습니다. 권장보다 ${Math.round((ratio - 1) * 100)}% 많습니다. ${detail}. 창고는 각오하셔야 합니다.`
         : ratio < 0.75
-        ? `${fmt(Math.round(tot))}톤만 걸었습니다. 권장의 ${Math.round(ratio * 100)}%입니다. ${detail}. 석 달 뒤는 제 책임 아닙니다.`
-        : `${fmt(Math.round(tot))}톤 걸었습니다. ${detail}. 무난합니다.`;
+        ? `${span}${fmt(Math.round(tot))}톤만 걸었습니다. 권장의 ${Math.round(ratio * 100)}%입니다. ${detail}. 석 달 뒤는 제 책임 아닙니다.`
+        : `${span}${fmt(Math.round(tot))}톤 걸었습니다. ${detail}. 무난합니다.`;
     },
   };
 }
@@ -1339,11 +1362,13 @@ function advance() {
 
     /* 증설·본사 지시·고객 영업은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
        발주와 가동은 석 달 내내 그 방침대로 돈다. */
-    /* 속성 모드는 한 번 결재로 석 달을 돈다. 증설·본사 지시·고객군 영업은 분기 첫 달에만 집행하고,
-       소재 발주는 사장이 적은 톤수를 첫 달에만 건다 — 둘째·셋째 달은 그 방침대로 자동으로 건다.
-       안 그러면 적어낸 톤수가 석 달 내내 세 번 나가 재고가 세 배로 쌓인다. */
+    /* 속성 모드는 한 번 결재로 석 달을 돈다.
+       증설·본사 지시·고객군 영업은 분기 첫 달에만 집행한다.
+       소재 발주도 분기 첫 달에 석 달치를 한 장으로 건다 —
+       사장이 적어낸 숫자가 곧 그 분기에 나가는 전부다.
+       나머지 두 달은 0으로 둔다. 자동으로 더 나가면 그건 결재가 아니다. */
     const ui = i === 0 ? G.ui
-             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, orderTon: null, orderBy: null };
+             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, orderTon: 0 };
     worldPre(s, G.W);                       // 설비·품질이 이번 달 캐파와 수율을 정한다
     const res = resolveTurn(s, buildDecision(s, ui));
     worldPost(res.state, G.W, res.report, G); // 결과가 설비·관계·피로를 움직이고, 다음 사건을 부른다

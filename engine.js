@@ -197,6 +197,11 @@ const CFG = {
   DELAY_RATE: 0.12,
   LOSS_GIVEN_DEFAULT: 0.40,        // 사고 난 채권에서 실제로 떼이는 비율. 나머지는 건진다
 
+  // 사기 [가정]
+  MORALE_BASE: 62,                 // 아무 일도 없으면 여기로 돌아온다
+  MORALE_REVERT: 0.08,             // 매달 기준선 쪽으로 이만큼 회귀
+  MORALE_YIELD: 0.00025,           // 사기 1점당 수율 (70 아래에서만). 20점 = 0.5%p
+
   /* ---- 재고 보유의 대가 (실무자 확인 반영) ----
      현물 전략의 비용은 가격 폭락 하나가 아니다. 네 가지가 같이 붙는다.
        1) 가격 폭락       → STEP 13 저가법 평가
@@ -562,8 +567,11 @@ function spotExposure(state) {
   return (inventoryTons(state, 'SPOT') + openPoTons(state, 'SPOT')) * state.market.pm;
 }
 
+/* 사기가 낮으면 수율이 떨어진다 — 손이 거칠어지고 눈이 덜 간다.
+   계수가 크면 사기 하나로 손익이 결정돼 버리므로, 현장 감각 수준으로만 둔다.
+   사기 70이 기준선이고 20점 떨어지면 수율 0.5%p가 빠진다 (톤당 $3 남짓). */
 function effectiveYield(base, morale) {
-  return base - Math.max(0, 70 - morale) * 0.0004;
+  return base - Math.max(0, 70 - morale) * CFG.MORALE_YIELD;
 }
 
 /* ---------- FIFO 출고 ---------- */
@@ -1151,6 +1159,11 @@ function resolveTurn(state, decision) {
   s.lossStreak = op < 0 ? (s.lossStreak || 0) + 1 : 0;
   if (s.lossStreak >= 3) s.morale -= 3;
   else if (op > 0) s.morale += 1;
+  /* 평균 회귀. 이게 없으면 사기가 한 방향으로만 굴러떨어진다 —
+     적자 → 사기 하락 → 수율 하락 → 더 큰 적자. 회복 경로가 "흑자를 내면"뿐인데
+     흑자를 내려면 사기가 필요하니, 한 번 빠지면 바닥까지 간다.
+     실제로는 나쁜 일이 안 생기면 사람은 원래 기분으로 돌아온다. */
+  s.morale += (CFG.MORALE_BASE - s.morale) * CFG.MORALE_REVERT;
   // 약속을 지킨 달은 평판이 회복된다. 바닥에 있을수록 빨리 올라온다 (평균 회귀).
   if (shippedTotal > 0 && shortageEvents.length === 0) s.trust += s.trust < 60 ? 2 : 1;
   s.morale = Math.max(0, Math.min(100, s.morale));
@@ -1285,25 +1298,45 @@ function grade(state, target = 45_000_000) {
       desc: survived ? '자본이 잠식되었습니다. 수행률을 따지기 전에 회사가 남아 있어야 합니다.'
                      : '자금이 끊겼습니다. 본사도 법인도 남은 게 없습니다.' };
   }
-  // 1순위: 본사 정책 수행
+  const f = (fulfil * 100).toFixed(0);
+  const opStr = `${soloOp < 0 ? '−' : ''}$${Math.round(Math.abs(soloOp) / 1000).toLocaleString()}k`;
+
+  /* 누적 영업이익이 적자면 그 위로 못 올라간다.
+     본사 물량을 아무리 잘 쳐냈어도, 4년을 굴려 법인이 적자면 그건 경영을 못 한 것이다.
+     사장은 본사 심부름꾼이 아니라 이 법인의 손익을 책임지는 사람이다.
+     적자인 채로 본사 실적만 만든 판은 C가 상한이고, 수행률까지 낮으면 D·F로 내려간다. */
+  if (!soloOk) {
+    if (fulfil >= 0.90 && consol >= target) {
+      return { ...base, grade: 'C', title: '본사만 이겼습니다',
+        desc: `내시 물량 ${f}%를 쳐냈고 모법이익도 목표를 넘겼습니다. 본사 영업본부는 만족할 겁니다. `
+            + `다만 법인 누적 영업이익이 ${opStr}입니다. 주재원이 욕먹어가며 본사 실적을 만든 판이고, `
+            + `현실에서 제일 흔한 결말이기도 합니다. 그래도 좋은 성적표는 아닙니다 — 적자 법인은 언젠가 접습니다.` };
+    }
+    if (fulfil >= 0.75) {
+      return { ...base, grade: 'D', title: '물량은 채웠는데 돈을 잃었습니다',
+        desc: `내시 물량 ${f}%. 본사 기준으로는 문제 삼을 정도가 아닙니다. `
+            + `문제는 법인 누적 영업이익이 ${opStr}이라는 겁니다. 팔수록 손해 보는 구조를 4년 동안 안 고쳤습니다.` };
+    }
+    return { ...base, grade: 'F', title: '둘 다 놓쳤습니다',
+      desc: `내시 물량 ${f}%에 법인 누적 영업이익 ${opStr}. 본사도 법인도 건진 게 없습니다.` };
+  }
+
+  // 흑자를 낸 판에서만 본사 수행률로 등급을 가른다
   if (fulfil >= 0.90 && consol >= target) {
-    return { ...base, grade: soloOk ? 'S' : 'A',
-      title: soloOk ? '둘 다 이겼습니다' : '본사는 이겼습니다',
-      desc: soloOk
-        ? '내시 물량을 거의 다 쳐냈고 법인도 흑자입니다. 드문 결말입니다.'
-        : `내시 물량 ${(fulfil * 100).toFixed(0)}%를 쳐냈습니다. 본사 평가는 최상위입니다. 다만 법인은 적자입니다 — 주재원이 욕먹으며 본사 실적을 만든 케이스이고, 현실에서 가장 흔한 결말입니다.` };
+    return { ...base, grade: 'S', title: '둘 다 이겼습니다',
+      desc: `내시 물량을 ${f}% 쳐냈고 법인도 누적 영업이익 ${opStr}로 흑자입니다. 드문 결말입니다.` };
+  }
+  if (fulfil >= 0.90) {
+    return { ...base, grade: 'A', title: '잘 굴렸습니다',
+      desc: `내시 물량 ${f}%에 법인도 흑자(${opStr})입니다. 모법이익이 목표에 조금 못 미쳤을 뿐입니다.` };
   }
   if (fulfil >= 0.75) {
     return { ...base, grade: 'B', title: '무난했습니다',
-      desc: `내시 물량 ${(fulfil * 100).toFixed(0)}%. 본사 기준으로 문제 삼을 정도는 아닙니다.` };
+      desc: `내시 물량 ${f}%, 법인 누적 영업이익 ${opStr}. 본사 기준으로 문제 삼을 정도는 아닙니다.` };
   }
-  // 2순위: 수행률이 낮으면 법인이 아무리 좋아도 그 위로 못 올라간다
-  if (soloOk) {
-    return { ...base, grade: 'C', title: '혼자만 이겼습니다',
-      desc: `법인 손익은 지켰습니다. 그런데 내시 물량은 ${(fulfil * 100).toFixed(0)}%만 쳐냈습니다. 본사가 이 법인을 왜 세웠는지를 생각하면, 이건 좋은 성적표가 아닙니다.` };
-  }
-  return { ...base, grade: 'D', title: '둘 다 놓쳤습니다',
-    desc: `내시 물량 ${(fulfil * 100).toFixed(0)}%, 법인도 적자입니다.` };
+  return { ...base, grade: 'C', title: '혼자만 이겼습니다',
+    desc: `법인 손익은 지켰습니다(${opStr}). 그런데 내시 물량은 ${f}%만 쳐냈습니다. `
+        + `본사가 이 법인을 왜 세웠는지를 생각하면, 이것도 좋은 성적표는 아닙니다.` };
 }
 
 if (typeof module !== 'undefined') {

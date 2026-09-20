@@ -720,6 +720,11 @@ const CFG = {
   DELAY_RATE: 0.12,
   LOSS_GIVEN_DEFAULT: 0.40,        // 사고 난 채권에서 실제로 떼이는 비율. 나머지는 건진다
 
+  // 사기 [가정]
+  MORALE_BASE: 62,                 // 아무 일도 없으면 여기로 돌아온다
+  MORALE_REVERT: 0.08,             // 매달 기준선 쪽으로 이만큼 회귀
+  MORALE_YIELD: 0.00025,           // 사기 1점당 수율 (70 아래에서만). 20점 = 0.5%p
+
   /* ---- 재고 보유의 대가 (실무자 확인 반영) ----
      현물 전략의 비용은 가격 폭락 하나가 아니다. 네 가지가 같이 붙는다.
        1) 가격 폭락       → STEP 13 저가법 평가
@@ -1085,8 +1090,11 @@ function spotExposure(state) {
   return (inventoryTons(state, 'SPOT') + openPoTons(state, 'SPOT')) * state.market.pm;
 }
 
+/* 사기가 낮으면 수율이 떨어진다 — 손이 거칠어지고 눈이 덜 간다.
+   계수가 크면 사기 하나로 손익이 결정돼 버리므로, 현장 감각 수준으로만 둔다.
+   사기 70이 기준선이고 20점 떨어지면 수율 0.5%p가 빠진다 (톤당 $3 남짓). */
 function effectiveYield(base, morale) {
-  return base - Math.max(0, 70 - morale) * 0.0004;
+  return base - Math.max(0, 70 - morale) * CFG.MORALE_YIELD;
 }
 
 /* ---------- FIFO 출고 ---------- */
@@ -1674,6 +1682,11 @@ function resolveTurn(state, decision) {
   s.lossStreak = op < 0 ? (s.lossStreak || 0) + 1 : 0;
   if (s.lossStreak >= 3) s.morale -= 3;
   else if (op > 0) s.morale += 1;
+  /* 평균 회귀. 이게 없으면 사기가 한 방향으로만 굴러떨어진다 —
+     적자 → 사기 하락 → 수율 하락 → 더 큰 적자. 회복 경로가 "흑자를 내면"뿐인데
+     흑자를 내려면 사기가 필요하니, 한 번 빠지면 바닥까지 간다.
+     실제로는 나쁜 일이 안 생기면 사람은 원래 기분으로 돌아온다. */
+  s.morale += (CFG.MORALE_BASE - s.morale) * CFG.MORALE_REVERT;
   // 약속을 지킨 달은 평판이 회복된다. 바닥에 있을수록 빨리 올라온다 (평균 회귀).
   if (shippedTotal > 0 && shortageEvents.length === 0) s.trust += s.trust < 60 ? 2 : 1;
   s.morale = Math.max(0, Math.min(100, s.morale));
@@ -1808,25 +1821,45 @@ function grade(state, target = 45_000_000) {
       desc: survived ? '자본이 잠식되었습니다. 수행률을 따지기 전에 회사가 남아 있어야 합니다.'
                      : '자금이 끊겼습니다. 본사도 법인도 남은 게 없습니다.' };
   }
-  // 1순위: 본사 정책 수행
+  const f = (fulfil * 100).toFixed(0);
+  const opStr = `${soloOp < 0 ? '−' : ''}$${Math.round(Math.abs(soloOp) / 1000).toLocaleString()}k`;
+
+  /* 누적 영업이익이 적자면 그 위로 못 올라간다.
+     본사 물량을 아무리 잘 쳐냈어도, 4년을 굴려 법인이 적자면 그건 경영을 못 한 것이다.
+     사장은 본사 심부름꾼이 아니라 이 법인의 손익을 책임지는 사람이다.
+     적자인 채로 본사 실적만 만든 판은 C가 상한이고, 수행률까지 낮으면 D·F로 내려간다. */
+  if (!soloOk) {
+    if (fulfil >= 0.90 && consol >= target) {
+      return { ...base, grade: 'C', title: '본사만 이겼습니다',
+        desc: `내시 물량 ${f}%를 쳐냈고 모법이익도 목표를 넘겼습니다. 본사 영업본부는 만족할 겁니다. `
+            + `다만 법인 누적 영업이익이 ${opStr}입니다. 주재원이 욕먹어가며 본사 실적을 만든 판이고, `
+            + `현실에서 제일 흔한 결말이기도 합니다. 그래도 좋은 성적표는 아닙니다 — 적자 법인은 언젠가 접습니다.` };
+    }
+    if (fulfil >= 0.75) {
+      return { ...base, grade: 'D', title: '물량은 채웠는데 돈을 잃었습니다',
+        desc: `내시 물량 ${f}%. 본사 기준으로는 문제 삼을 정도가 아닙니다. `
+            + `문제는 법인 누적 영업이익이 ${opStr}이라는 겁니다. 팔수록 손해 보는 구조를 4년 동안 안 고쳤습니다.` };
+    }
+    return { ...base, grade: 'F', title: '둘 다 놓쳤습니다',
+      desc: `내시 물량 ${f}%에 법인 누적 영업이익 ${opStr}. 본사도 법인도 건진 게 없습니다.` };
+  }
+
+  // 흑자를 낸 판에서만 본사 수행률로 등급을 가른다
   if (fulfil >= 0.90 && consol >= target) {
-    return { ...base, grade: soloOk ? 'S' : 'A',
-      title: soloOk ? '둘 다 이겼습니다' : '본사는 이겼습니다',
-      desc: soloOk
-        ? '내시 물량을 거의 다 쳐냈고 법인도 흑자입니다. 드문 결말입니다.'
-        : `내시 물량 ${(fulfil * 100).toFixed(0)}%를 쳐냈습니다. 본사 평가는 최상위입니다. 다만 법인은 적자입니다 — 주재원이 욕먹으며 본사 실적을 만든 케이스이고, 현실에서 가장 흔한 결말입니다.` };
+    return { ...base, grade: 'S', title: '둘 다 이겼습니다',
+      desc: `내시 물량을 ${f}% 쳐냈고 법인도 누적 영업이익 ${opStr}로 흑자입니다. 드문 결말입니다.` };
+  }
+  if (fulfil >= 0.90) {
+    return { ...base, grade: 'A', title: '잘 굴렸습니다',
+      desc: `내시 물량 ${f}%에 법인도 흑자(${opStr})입니다. 모법이익이 목표에 조금 못 미쳤을 뿐입니다.` };
   }
   if (fulfil >= 0.75) {
     return { ...base, grade: 'B', title: '무난했습니다',
-      desc: `내시 물량 ${(fulfil * 100).toFixed(0)}%. 본사 기준으로 문제 삼을 정도는 아닙니다.` };
+      desc: `내시 물량 ${f}%, 법인 누적 영업이익 ${opStr}. 본사 기준으로 문제 삼을 정도는 아닙니다.` };
   }
-  // 2순위: 수행률이 낮으면 법인이 아무리 좋아도 그 위로 못 올라간다
-  if (soloOk) {
-    return { ...base, grade: 'C', title: '혼자만 이겼습니다',
-      desc: `법인 손익은 지켰습니다. 그런데 내시 물량은 ${(fulfil * 100).toFixed(0)}%만 쳐냈습니다. 본사가 이 법인을 왜 세웠는지를 생각하면, 이건 좋은 성적표가 아닙니다.` };
-  }
-  return { ...base, grade: 'D', title: '둘 다 놓쳤습니다',
-    desc: `내시 물량 ${(fulfil * 100).toFixed(0)}%, 법인도 적자입니다.` };
+  return { ...base, grade: 'C', title: '혼자만 이겼습니다',
+    desc: `법인 손익은 지켰습니다(${opStr}). 그런데 내시 물량은 ${f}%만 쳐냈습니다. `
+        + `본사가 이 법인을 왜 세웠는지를 생각하면, 이것도 좋은 성적표는 아닙니다.` };
 }
 
 </script>
@@ -4286,8 +4319,10 @@ function openDecisions() {
       <div class="deckq"><h2>${card.title}</h2></div>
       <div class="ordwrap">
         <table class="ordt">
-          <tr><th>고객군</th><th>월 사용<br><i>소재 기준</i></th><th>창고<br>현물</th><th>해상<br>미착</th>
-              <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th><th>발주 (톤)</th></tr>
+          <tr><th>고객군</th><th>${card.months > 1 ? '분기 사용<br><i>석 달치 · 소재' : '월 사용<br><i>소재'} 기준</i></th>
+              <th>창고<br>현물</th><th>해상<br>미착</th>
+              <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th>
+              <th>${card.months > 1 ? '분기 발주 (톤)' : '발주 (톤)'}</th></tr>
           ${rows.map(r => `<tr>
             <td class="oname">${CUST[r.k]} <i>${CFG.CUSTOMERS[r.k].name}</i></td>
             <td>${fmt(Math.round(r.use))}</td>
@@ -4310,9 +4345,10 @@ function openDecisions() {
         </div>
         <p class="hint">고객군별 재고는 판매 비중으로 배분한 추정치입니다. 같은 규격을 여러 고객이 쓰니
           칼같이 갈리지는 않습니다. 지금 걸면 <b>${lead}개월 뒤</b> 야드에 내립니다.<br>
-          본사 압연 스케줄 때문에 한 달에 소요량의 <b>1.6배</b>까지만 걸 수 있습니다 —
-          한 번 바닥나면 한 달 만에는 못 메웁니다.</p>
-        <button class="primary" id="osubmit">이대로 발주한다</button>
+          본사 압연 스케줄 때문에 ${card.months > 1 ? '분기' : '한 달'} 소요량의 <b>1.6배</b>까지만 걸 수 있습니다 —
+          한 번 바닥나면 금방은 못 메웁니다.
+          ${card.months > 1 ? '<br>적어주신 톤수는 석 달에 나눠서 집행합니다.' : ''}</p>
+        <button class="primary" id="osubmit">${card.months > 1 ? '이대로 분기 발주' : '이대로 발주한다'}</button>
       </div>
     </div>`;
 
@@ -4426,22 +4462,38 @@ function customerCard(s) {
    재고를 고객군별로 딱 갈라놓을 수는 없다 — 같은 규격을 여러 고객이 쓰니까.
    그래서 판매 비중으로 배분한 추정치를 보여준다. 실무에서도 그렇게 본다.
    ============================================================ */
+/* 한 번 결재로 몇 달을 거는가.
+   노멀은 매달 결재하니 한 달치, 속성은 분기마다 결재하니 석 달치를 한 번에 건다.
+   분기 결재인데 한 달치만 걸면 나머지 두 달은 사장이 안 본 사이에 자동으로 나가버린다.
+   그건 발주를 결정한 게 아니다. */
+function orderMonths() { return (G && G.mpt) || 1; }
+
 function orderRows(s, L) {
   const onhand = inventoryTons(s), sea = seaTons(s), prod = prodTons(s);
   const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
   const cover = (G && G.ui && G.ui.cover) || 2.9;
+  const mo = orderMonths();
   return Object.keys(CUST).map(k => {
     const sh = s.custShare[k] || 0;
-    const use = L.need * sh;                       // 소재 기준 월 소요량
+    const use = L.need * sh * mo;                  // 이번 결재가 덮는 기간의 소재 소요량
     const oh = onhand * sh, se = sea * sh, pr = prod * sh;
     const inv = oh + se, res = inv + pr;
-    /* 본사 압연 스케줄에 한 달에 밀어 넣을 수 있는 양은 한계가 있다.
+    /* 본사 압연 스케줄에 밀어 넣을 수 있는 양은 한계가 있다.
        재고가 바닥나도 한 달에 소요량의 1.6배까지만 걸린다 — 그래서 결품은
        한 번 나면 한 달 만에 못 메운다. 그게 발주를 미루면 안 되는 이유다. */
     const MAX = use * 1.6;
-    const rec = Math.min(MAX, Math.max(0, use * (lead + cover) - res));
+    /* 권장량 = 이번 기간에 쓸 양 + (목표 재원 − 지금 재원).
+       앞의 항이 소비를 메우고, 뒤의 항이 재원을 목표로 되돌린다.
+       뒤의 항을 빼먹으면 재원이 한번 어긋난 채로 계속 간다.
+       분기 결재는 use가 이미 석 달치라 앞의 항이 석 달치가 된다. */
+    const useM = use / mo;
+    /* 분기에 한 번 몰아서 걸면 재고가 톱니처럼 오르내린다. 발주 직후가 꼭대기고
+       다음 결재 직전이 바닥이다. 목표를 꼭대기에 맞추면 평균 재고가 매달 결재할 때보다
+       반 분기만큼 높아진다. 그래서 목표를 그만큼 내려 평균을 같은 자리에 둔다. */
+    const aim = lead + cover - (mo - 1) / 2;
+    const rec = Math.min(MAX, Math.max(0, use + useM * aim - res));
     return { k, sh, use, oh, sea: se, prod: pr, inv, res, max: Math.round(MAX / 50) * 50,
-      invM: use > 0 ? inv / use : 0, resM: use > 0 ? res / use : 0,
+      invM: useM > 0 ? inv / useM : 0, resM: useM > 0 ? res / useM : 0,
       rec: Math.round(rec / 50) * 50 };
   }).filter(r => r.sh > 0.01);
 }
@@ -4449,12 +4501,15 @@ function orderRows(s, L) {
 function orderCard(s, W, L) {
   const rows = orderRows(s, L);
   const sn = stockNow(s);
+  const mo = orderMonths();
   return {
-    id: 'op-order', who: 'jung', topic: 'order', form: 'order', rows,
-    title: '이번 달 소재 발주를 정해주십시오',
-    text: `사장님, 이번 달 발주입니다. 지금 전체로 보면 재고율 ${sn.invM.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월이고요. `
-        + `고객군별로 쓰는 속도가 다르니까 한 줄씩 보고 정하시죠. `
-        + `제가 계산한 권장량을 넣어뒀는데, 이건 어디까지나 내시가 그대로 간다는 전제입니다. `
+    id: 'op-order', who: 'jung', topic: 'order', form: 'order', rows, months: mo,
+    title: mo > 1 ? '이번 분기 소재 발주를 정해주십시오' : '이번 달 소재 발주를 정해주십시오',
+    text: `사장님, ${mo > 1 ? '이번 분기' : '이번 달'} 발주입니다. `
+        + `지금 전체로 보면 재고율 ${sn.invM.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월이고요. `
+        + `${mo > 1 ? `분기 결재니까 석 달치를 한 번에 겁니다. 적어주신 톤수를 세 달에 나눠서 집행합니다. ` : ''}`
+        + `고객군별로 쓰는 속도가 다릅니다. 한 줄씩 보고 정하시죠. `
+        + `제가 계산한 권장량을 넣어뒀는데, 이건 내시가 그대로 간다는 전제입니다. `
         + `걸면 ${CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd}개월 뒤에 들어옵니다. 그때 가서 바꾸자는 건 안 됩니다.`,
     submit: (vals, s, G) => {
       // 본사가 한 달에 받아주는 한도. 넘겨 적어도 여기서 잘린다.
@@ -4473,11 +4528,12 @@ function orderCard(s, W, L) {
       if (ratio > 1.25) styleAdd(W, 'grow');
       if (ratio < 0.75) styleAdd(W, 'cash');
       const detail = rows.map(r => `${CUST[r.k]} ${fmt(Math.round(vals[r.k] || 0))}t`).join(' · ');
+      const span = mo > 1 ? `석 달치 ` : '';
       return ratio > 1.25
-        ? `${fmt(Math.round(tot))}톤 걸었습니다. 권장보다 ${Math.round((ratio - 1) * 100)}% 많습니다. ${detail}. 창고는 각오하셔야 합니다.`
+        ? `${span}${fmt(Math.round(tot))}톤 걸었습니다. 권장보다 ${Math.round((ratio - 1) * 100)}% 많습니다. ${detail}. 창고는 각오하셔야 합니다.`
         : ratio < 0.75
-        ? `${fmt(Math.round(tot))}톤만 걸었습니다. 권장의 ${Math.round(ratio * 100)}%입니다. ${detail}. 석 달 뒤는 제 책임 아닙니다.`
-        : `${fmt(Math.round(tot))}톤 걸었습니다. ${detail}. 무난합니다.`;
+        ? `${span}${fmt(Math.round(tot))}톤만 걸었습니다. 권장의 ${Math.round(ratio * 100)}%입니다. ${detail}. 석 달 뒤는 제 책임 아닙니다.`
+        : `${span}${fmt(Math.round(tot))}톤 걸었습니다. ${detail}. 무난합니다.`;
     },
   };
 }
@@ -5351,11 +5407,13 @@ function advance() {
 
     /* 증설·본사 지시·고객 영업은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
        발주와 가동은 석 달 내내 그 방침대로 돈다. */
-    /* 속성 모드는 한 번 결재로 석 달을 돈다. 증설·본사 지시·고객군 영업은 분기 첫 달에만 집행하고,
-       소재 발주는 사장이 적은 톤수를 첫 달에만 건다 — 둘째·셋째 달은 그 방침대로 자동으로 건다.
-       안 그러면 적어낸 톤수가 석 달 내내 세 번 나가 재고가 세 배로 쌓인다. */
+    /* 속성 모드는 한 번 결재로 석 달을 돈다.
+       증설·본사 지시·고객군 영업은 분기 첫 달에만 집행한다.
+       소재 발주도 분기 첫 달에 석 달치를 한 장으로 건다 —
+       사장이 적어낸 숫자가 곧 그 분기에 나가는 전부다.
+       나머지 두 달은 0으로 둔다. 자동으로 더 나가면 그건 결재가 아니다. */
     const ui = i === 0 ? G.ui
-             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, orderTon: null, orderBy: null };
+             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, orderTon: 0 };
     worldPre(s, G.W);                       // 설비·품질이 이번 달 캐파와 수율을 정한다
     const res = resolveTurn(s, buildDecision(s, ui));
     worldPost(res.state, G.W, res.report, G); // 결과가 설비·관계·피로를 움직이고, 다음 사건을 부른다
