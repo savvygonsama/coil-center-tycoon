@@ -256,13 +256,19 @@ function openDecisions() {
   const ask = () => {
     if (card.form === 'order') return askOrder();
     if (card.form === 'sales') return askSales();
-    dlg.innerHTML = `<div class="dlg">${head}
+    /* 사내 이야기는 큰 경영 안건과 시각적 비중을 달리한다.
+       고양이 집 얘기와 라인 고장이 같은 크기로 오면 무게를 구분할 수 없다. */
+    const small = deck === 'life';
+    dlg.innerHTML = `<div class="dlg${small ? ' slim' : ''}">${head}
       <div class="crew">${crewBlock(who)}
         <div class="crew-body"><div class="line says">${card.text}</div></div></div>
       <div class="deckq"><h2>${card.title}</h2></div>
-      <div class="optlist">${card.opts.map((o, i) => `
+      ${ctxStrip(card.ctx)}
+      <div class="optlist" id="olist">${card.opts.map((o, i) => `
         <button data-o="${i}"><b>${o.label}</b>${
           o.hint ? `<span class="why">${o.hint}</span>` : ''}${fxChips(o.fx)}</button>`).join('')}</div>
+      ${small ? '' : miniStatus(G.s, G.W)}
+      <div id="vslot"></div>
     </div>`;
     dlg.querySelectorAll('[data-o]').forEach(b => b.onclick = () => choose(+b.dataset.o));
   };
@@ -475,15 +481,26 @@ function openDecisions() {
 
     showVerdict(o.label, msg, chips,
       o.mult && o.mult !== 1 ? `<div class="chips"><span class="chip ${o.mult >= 1 ? 'up' : 'down'}">
-        소재 발주 권장량 ×${o.mult} — 마지막 발주 표에 반영됩니다</span></div>` : '');
+        소재 발주 권장량 ×${o.mult} — 마지막 발주 표에 반영됩니다</span></div>` : '', i);
   };
 
-  const showVerdict = (choiceLabel, msg, chips, extra = '') => {
+  /* 고른 뒤에도 질문과 선택지를 그대로 둔 채, 그 아래에 반응과 변화량을 붙인다.
+     예전에는 화면을 통째로 갈아끼워서 "내가 뭘 보고 골랐더라"가 사라졌다.
+     고르지 않은 선택지는 흐려지고, 고른 것은 남는다. */
+  const showVerdict = (choiceLabel, msg, chips, extra = '', pickedIdx = -1) => {
     const last = G.qi + 1 >= G.queue.length;
     const pic = who.img ? `<img src="${A(who.img + `.png`)}" alt="">`
                         : `<div class="em">${who.face}</div>`;
-    dlg.innerHTML = `<div class="dlg">${head}
-      <div class="verdict">
+    const list = dlg.querySelector('#olist');
+    if (list) {
+      list.classList.add('done');
+      list.querySelectorAll('button').forEach((b, i) => {
+        b.disabled = true;
+        if (i === pickedIdx) b.classList.add('picked');
+      });
+    }
+    const slot = dlg.querySelector('#vslot');
+    const html = `<div class="verdict inline">
         <div class="vlabel">사장님의 결정</div>
         <div class="vchoice">${choiceLabel}</div>
         ${msg ? `<div class="vwho">${pic}<span>${who.name}</span></div>
@@ -492,10 +509,16 @@ function openDecisions() {
         ${extra}
       </div>
       <div class="vfoot"><button class="primary" id="nx">${
-        last ? (G.mpt > 1 ? '석 달 보내기' : '한 달 보내기') : '다음 결재'}</button></div></div>`;
+        last ? (G.mpt > 1 ? '석 달 보내기' : '한 달 보내기') : '다음 결재'}</button></div>`;
+    if (slot) { slot.innerHTML = html; }
+    else {
+      // 발주·영업계획처럼 폼 화면이면 통째로 갈아끼운다 (선택지가 없으므로 남길 게 없다)
+      dlg.innerHTML = `<div class="dlg">${head}${html}</div>`;
+    }
     dlg.querySelector('#nx').onclick = () => {
       dlg.close(); dlg.remove(); G.qi++; openDecisions();
     };
+    dlg.querySelector('#nx').scrollIntoView({ block: 'nearest' });
   };
 
   // ESC로 닫으면 결재 흐름이 끊긴다. 반드시 고르고 나가야 한다.
@@ -506,6 +529,72 @@ function openDecisions() {
 }
 
 // 카드가 조건을 볼 때 쓰는 이번 달 상황
+/* ============================================================
+   판단 근거 — 안건마다 그 결정에 필요한 숫자만 옆에 붙인다.
+
+   결재 팝업에서는 경영 현황 화면이 안 보인다. 그렇다고 전부 다시 보여주면
+   읽을 게 너무 많아 아무것도 안 읽는다. 그래서 안건별로 관련된 서너 줄만 올린다.
+
+   확인 / 추정 / 소문을 구분해서 붙인다. 숨겨진 미래 난수는 올리지 않는다 —
+   지금 사장이 알 수 있는 것만 올린다.
+   ============================================================ */
+const CTX_KIND = { fact: ['확인', 'k-ok'], est: ['추정', 'k-est'], rumor: ['소문', 'k-rum'] };
+function ctxStrip(items) {
+  const list = (items || []).filter(Boolean);
+  if (!list.length) return '';
+  return `<div class="ctxs">${list.map(it => {
+    const [lab, cls] = CTX_KIND[it.kind || 'fact'] || CTX_KIND.fact;
+    return `<div class="ctx${it.warn ? ' w' : ''}">
+      <span class="ck ${cls}">${lab}</span>
+      <span class="cl">${it.label}</span>
+      <span class="cv">${it.value}</span>
+      ${it.note ? `<span class="cn">${it.note}</span>` : ''}</div>`;
+  }).join('')}</div>`;
+}
+
+/* 회사를 다섯 줄로 요약한 것. 메인 화면 맨 위와 결재 중 「지금 회사 상태」가 같은 값을 쓴다.
+   두 화면이 다른 숫자를 보여주면 그것부터가 신뢰를 깎는다. */
+function keyMetrics(s, W) {
+  const n = stockNow(s);
+  const h = s.history;
+  const mpt = (G && G.mpt) || 1;
+  const recent = h.slice(-mpt);
+  const prev = h.slice(-mpt * 2, -mpt);
+  const sum = (a, k) => a.reduce((x, r) => x + (r[k] || 0), 0);
+  const op = recent.length ? sum(recent, 'op') : 0;
+  const opPrev = prev.length ? sum(prev, 'op') : null;
+  const lastR = h[h.length - 1] || (s.prelude || []).slice(-1)[0];
+  const fulfil = lastR ? (Object.values(lastR.shipped).reduce((a, b) => a + b, 0)
+    / Math.max(1, Object.values(lastR.demandAuto).reduce((a, b) => a + b, 0))) : 1;
+  const room = Math.max(0, s.debt.limit - s.debt.principal);
+  const yard = inventoryTons(s) / CFG.WAREHOUSE_CAP_BASE;
+  const m = ((s.turn - 1) % 12);
+  const pace = W.hq.target > 0 && m > 0 ? W.hq.ytd / (W.hq.target * m / 12) : null;
+  return {
+    op, opPrev, cumOp: s.cum.op,
+    fulfil, yard, coverM: n.invM, resM: n.resM,
+    cash: s.cash, room, runway: runway(s), pace,
+    hqYtd: W.hq.ytd, hqTarget: W.hq.target,
+  };
+}
+
+/* 결재 중에 열어보는 현황. 접혀 있고, 열면 위 다섯 줄이 그대로 나온다. */
+function miniStatus(s, W) {
+  const k = keyMetrics(s, W);
+  const row = (lab, val, cls) => `<tr><td>${lab}</td><td class="${cls || ''}">${val}</td></tr>`;
+  return `<details class="minis"><summary>지금 회사 상태 펼쳐보기</summary>
+    <table>
+      ${row((G && G.mpt > 1 ? '지난 분기' : '지난달') + ' 영업이익', money(k.op), k.op < 0 ? 'v neg' : 'v pos')}
+      ${row('누계 영업이익', money(k.cumOp), k.cumOp < 0 ? 'v neg' : 'v pos')}
+      ${row('지난달 납기 달성', Math.round(k.fulfil * 100) + '%', k.fulfil < 0.95 ? 'v neg' : '')}
+      ${row('재고율 · 야드', `${k.coverM.toFixed(1)}개월 · ${Math.round(k.yard * 100)}%`,
+            k.coverM < COVER.warn || k.yard > 0.9 ? 'v neg' : '')}
+      ${row('현금 + 한도 여력', `${money(k.cash + k.room)} · ${k.runway.toFixed(1)}개월치`,
+            k.runway < 1.5 ? 'v neg' : '')}
+      ${k.pace != null ? row('본사 목표 페이스', Math.round(k.pace * 100) + '%', k.pace < 0.85 ? 'v neg' : '') : ''}
+    </table></details>`;
+}
+
 function cardCtx(s) {
   const c = capacityOf(s);
   const n = s.nasi[0] ? s.nasi[0].tons : {};
@@ -1082,6 +1171,86 @@ function statusPanel(s, W) {
 }
 
 /* 지난달 결정의 영향 — 선택과 결과를 한 줄로 잇는다 */
+/* ============================================================
+   메인 화면 맨 위 세 덩이.
+     ① 이번 기간에 뭘 해야 하고 지금 뭐가 급한가
+     ② 회사를 다섯 줄로
+     ③ 지난 결정이 무엇이 됐나 (최대 셋)
+   나머지는 전부 접는다. 결재 전에 읽을 것과 결재 후에 들여다볼 것은 다르다.
+   ============================================================ */
+function goalPanel(s, W) {
+  const k = keyMetrics(s, W);
+  const m = ((s.turn - 1) % 12);
+  const yr = Math.floor((s.turn - 1) / 12) + 1;
+  const need = W.hq.target > 0 ? Math.max(0, W.hq.target - W.hq.ytd) : 0;
+  const leftM = 12 - m;
+  const w = warnings(s, W).slice(0, 2);
+  return `<div class="card goal">
+    <h2>${yr}년차 ${periodNow().replace(/^\d+년 /, '')} — 이번에 할 일</h2>
+    <div class="goalrow">
+      ${W.hq.target > 0 ? `<div class="gbox">
+        <span class="gl">본사 소재 판매 목표</span>
+        <span class="gv">${fmt(Math.round(W.hq.ytd))} / ${fmt(Math.round(W.hq.target))}t</span>
+        <span class="gn ${k.pace != null && k.pace < 0.85 ? 'bad' : ''}">남은 ${leftM}개월에 ${fmt(Math.round(need))}t${
+          k.pace != null ? ` · 페이스 ${Math.round(k.pace * 100)}%` : ''}</span>
+      </div>` : ''}
+      <div class="gbox">
+        <span class="gl">누계 영업이익</span>
+        <span class="gv ${k.cumOp < 0 ? 'bad' : 'good'}">${money(k.cumOp)}</span>
+        <span class="gn">적자로 끝나면 경영 평가는 낙제입니다</span>
+      </div>
+    </div>
+    ${w.length ? `<div class="urg">${w.map(([kk, t]) =>
+      `<div class="warn"><i>⚠ ${kk}</i><span>${t}</span></div>`).join('')}</div>`
+      : '<div class="urg none">지금 급한 건 없습니다.</div>'}
+  </div>`;
+}
+
+/* 핵심 지표 다섯. 색만으로 좋고 나쁨을 말하지 않고 상태 단어를 같이 적는다. */
+function kpiRow(s, W) {
+  const k = keyMetrics(s, W);
+  const per = (G && G.mpt > 1) ? '지난 분기' : '지난달';
+  const dOp = k.opPrev != null ? k.op - k.opPrev : null;
+  const box = (lab, val, state, sub) => `<div class="kpi k-${state}">
+    <span class="kl">${lab}</span><span class="kv">${val}</span>
+    <span class="ks">${sub}</span></div>`;
+  return `<div class="kpis">
+    ${box(`${per} 영업이익`, money(k.op), k.op < 0 ? 'bad' : 'good',
+      dOp == null ? '비교할 직전 기간 없음' : `직전 대비 ${dOp >= 0 ? '▲ +$' : '▼ −$'}${money1k(Math.abs(dOp))}`)}
+    ${box('납기 달성', Math.round(k.fulfil * 100) + '%', k.fulfil < 0.95 ? 'bad' : 'good',
+      k.fulfil < 0.95 ? '못 채운 고객이 있습니다' : '다 채웠습니다')}
+    ${box('재고 · 야드', `${k.coverM.toFixed(1)}개월`, k.coverM < COVER.warn || k.yard > 0.9 ? 'bad' : k.coverM > COVER.heavy ? 'warn' : 'good',
+      `야드 ${Math.round(k.yard * 100)}%${k.coverM < COVER.warn ? ' · 결품 위험' : k.yard > 0.9 ? ' · 자리 없음' : ''}`)}
+    ${box('자금 여력', `${k.runway.toFixed(1)}개월치`, k.runway < 1.5 ? 'bad' : k.runway < 2.5 ? 'warn' : 'good',
+      `현금 $${money1k(k.cash)} + 한도 $${money1k(k.room)}`)}
+    ${k.pace != null ? box('본사 목표', Math.round(k.pace * 100) + '%', k.pace < 0.85 ? 'bad' : 'good',
+      k.pace < 0.85 ? '뒤처지고 있습니다' : '페이스대로입니다') : ''}
+  </div>`;
+}
+
+/* 지난 결정의 핵심 결과 — 최대 셋. 돌아온 청구서를 먼저, 그다음 영향 큰 순서.
+   전부 보여주는 건 아래 접힌 곳에 그대로 둔다. */
+function topResults(s, W) {
+  const items = [];
+  for (const f of (W.lastFired || []).slice(0, 2))
+    items.push({ kind: 'bill', text: f.text, why: f.chain ? `${f.chain.date} ${f.chain.label} · ${f.chain.gap}개월 뒤` : f.why });
+  for (const im of (W.lastImpacts || [])) {
+    if (items.length >= 3) break;
+    items.push({ kind: 'imp', text: im.label, rows: im.rows });
+  }
+  if (!items.length) return '';
+  return `<div class="card tops">
+    <h2>지난 결정이 지금 무엇이 됐나</h2>
+    ${items.slice(0, 3).map(it => it.kind === 'bill'
+      ? `<div class="top bill"><b>${it.text}</b>${it.why ? `<span>원인 · ${it.why}</span>` : ''}</div>`
+      : `<div class="top"><b>${it.text}</b><div class="fx">${it.rows.map(([k, t]) => {
+          const cls = k === '+' ? 'up' : k === '−' ? 'dn' : k === '?' ? 'rsk' : 'neu';
+          return `<span class="${cls}">${FX_MARK[k] ? `<b class="fxm">${FX_MARK[k]}</b> ` : ''}${t}</span>`;
+        }).join('')}</div></div>`).join('')}
+    <p class="hint">판매량·이익 변화는 그 결정이 움직인 몫을 따로 떼어 <b>추정</b>한 값입니다. 실제 지출은 결산표에 있습니다.</p>
+  </div>`;
+}
+
 function impactPanel(W) {
   if (!W.lastImpacts.length) return '';
   return `<div class="card">
@@ -1197,25 +1366,32 @@ function renderPlay() {
 
     ${s.turn === 1 && !s.history.length ? takeoverBrief(s) : ''}
 
-    ${firedPanel(G.W)}
+    ${goalPanel(s, G.W)}
 
-    ${perfPanel(s)}
+    ${kpiRow(s, G.W)}
 
-    ${statusPanel(s, G.W)}
+    ${topResults(s, G.W)}
 
-    <div class="grid g2">${impactPanel(G.W) || ''}${warnPanel(s, G.W) || ''}</div>
-    ${pendingPanel(G.W, s)}
-
-    ${briefPanel(s, G.W)}
-
-    <div class="center" style="margin:6px 0 26px">
+    <div class="center" style="margin:6px 0 20px">
       <button class="primary" id="go">결재 시작</button>
       <p class="hint" style="margin-top:10px">${periodNow()} 안건이 올라와 있습니다.
-        보고를 읽고, 무엇이 급한지 판단하십시오.</p>
+        안건마다 판단에 필요한 숫자가 같이 올라옵니다.</p>
     </div>
 
-    ${plantView(s, L)}
+    <details class="fold" open><summary>부서 보고와 경고</summary>
+      ${briefPanel(s, G.W)}
+      ${firedPanel(G.W)}
+      <div class="grid g2">${impactPanel(G.W) || ''}${warnPanel(s, G.W) || ''}</div>
+      ${pendingPanel(G.W, s)}
+    </details>
 
+    <details class="fold"><summary>경영실적 상세표</summary>
+      ${perfPanel(s)}
+      ${statusPanel(s, G.W)}
+    </details>
+
+    <details class="fold"><summary>공장 · 재고 · 고객 · 수주 현황</summary>
+    ${plantView(s, L)}
 
     ${custPanel(s)}
 
@@ -1262,6 +1438,7 @@ function renderPlay() {
           ${n.invM < COVER.warn && s.turn > 5 ? `<div class="note bad">${CAST.jung.name}: 이대로면 다음 달 어느 고객 하나는 못 채웁니다.</div>` : ''}`; })()}
       </div>
     </div>
+    </details>
 
     ${decisionsMade()}`;
 
@@ -1343,8 +1520,31 @@ function expandCard(type, L, s) {
   const why = type === 'BLANK'
     ? '사장님예, 블랭킹은 우리한테 아예 없는 물건 아입니꺼. 한 대 놓으면 고객이 새로 붙습니더.'
     : `사장님예, 본사가 밀어주고 싶어 하는 물량이 우리 한계를 월 ${fmt(Math.round(type === 'SLIT' ? L.gapSlit : L.gapLevel))}톤 넘깁니더.`;
+  /* 증설 판단에 필요한 것 — 총액, 그 설비가 벌어들일 월 이익, 회수 기간, 남은 임기,
+     그리고 소재로 묶이는 돈. 기계값보다 소재값이 크다는 게 이 카드의 교훈이라 둘을 나란히 둔다. */
+  const gap = type === 'SLIT' ? L.gapSlit : type === 'LEVEL' ? L.gapLevel : CFG.LINE[type].cap * 0.6;
+  const addTon = Math.max(0, Math.min(CFG.LINE[type].cap, gap));
+  const perTon = (CFG.PROC_MARGIN[type === 'BLANK' ? 'TRAP' : type] || 30) - (CFG.VAR_COST[type === 'BLANK' ? 'TRAP' : type] || 9);
+  const monthly = addTon * perTon - (s.lines.length >= 2 ? CFG.FC_PER_EXTRA_LINE : 0);
+  const left = Math.max(1, CFG.TOTAL_TURNS - s.turn + 1 - CFG.INSTALL_TURNS);
+  const payback = monthly > 0 ? Math.round(total / monthly) : null;
+  const run = runway(s);
+  const ctx = [
+    { kind: 'fact', label: '초기 비용', value: money(total),
+      note: newBuild ? `설비 ${money(capex)} + 공장동 ${money(CFG.INFRA_TOTAL)}` : null },
+    { kind: 'est', label: '늘어나는 물량', value: `월 ${fmt(Math.round(addTon))}t`,
+      note: '본사가 밀어주고 싶어 하는 양에서 지금 못 받는 만큼' },
+    { kind: 'est', label: '월 이익 기여', value: monthly > 0 ? money(monthly) : '고정비도 못 건짐', warn: monthly <= 0 },
+    { kind: 'est', label: '회수 기간', value: payback ? `${payback}개월` : '회수 불가', warn: !payback || payback > left },
+    { kind: 'fact', label: `가동까지 ${CFG.INSTALL_TURNS}개월 · 남은 임기`, value: `가동 후 ${left}개월`,
+      note: payback && payback > left ? '임기 안에는 본전을 못 뽑습니다' : null },
+    { kind: 'fact', label: '소재로 묶이는 돈', value: money(feed),
+      note: '석 달치 기준. 기계값보다 이쪽이 큽니다', warn: feed > total },
+    { kind: 'fact', label: '지금 자금 여력', value: `${run.toFixed(1)}개월치`, warn: run < 2.5 },
+    (s.buildQueue || []).length ? { kind: 'fact', label: '진행 중인 증설', value: '있음 — 둘은 못 짓습니다', warn: true } : null,
+  ];
   return {
-    id: 'op-expand', who: 'gu', topic: 'op',
+    id: 'op-expand', who: 'gu', topic: 'op', ctx,
     title: `${CFG.LINE[type].label}를 한 대 더 놓을까요`,
     text: `${why} ${newBuild ? '근데 자리가 없심더. 공장동을 한 동 더 지어야 됩니더. ' : '자리는 있심더. '}`
         + `근데 하나만 말씀드리겠심더. 기계값보다 그 기계 먹일 소재값이 훨씬 큽니더. `
@@ -1698,17 +1898,96 @@ function advance() {
   showReport(mergeReports(reports));
 }
 
+/* 결산 첫 화면에 올릴 것 — 이번 결과, 직전 대비, 핵심 원인 셋, 다음 위험 하나.
+   원인은 실제로 장부에 찍힌 비용만 쓴다. 근거 없는 "이 결정이 얼마를 깎았다"를 지어내지 않는다.
+   추정치는 따로 표시하고 합계에 섞지 않는다. */
+function reportCauses(R) {
+  const out = [];
+  const add = (label, amt, kind) => { if (Math.abs(amt) > 500) out.push({ label, amt, kind }); };
+  add('안 팔려서 반값 처분', -(R.dumpLoss || 0), 'fact');
+  add('오래 묵어 못 쓰게 된 것', -(R.degradeLoss || 0), 'fact');
+  add('현물 재고 평가손', -(R.valuationLoss || 0), 'fact');
+  add('대손', -(R.badDebt || 0), 'fact');
+  add('이자', -(R.interest || 0), 'fact');
+  add('스크랩 판매', R.scrapRevenue || 0, 'fact');
+  if (R.overTons > 0) out.push({ label: `야드 한도 ${fmt(Math.round(R.overTons))}t 초과 — 외부창고·가동 지연`,
+    amt: -(R.overTons * CFG.WAREHOUSE_OVER_COST), kind: 'fact' });
+  out.sort((a, b) => Math.abs(b.amt) - Math.abs(a.amt));
+  return out.slice(0, 3);
+}
+
+/* 다음 기간에 제일 큰 위험 하나. 지금 숫자에서 바로 읽히는 것만 고른다. */
+function nextRisk(s, W) {
+  const k = keyMetrics(s, W);
+  if (k.runway < 1.5) return `자금 여력이 ${k.runway.toFixed(1)}개월치입니다. 한 달만 삐끗하면 소재 대금을 못 막습니다.`;
+  if (k.coverM < COVER.crisis) return `재고율 ${k.coverM.toFixed(1)}개월. 두 달 뒤 결품이 납니다. 지금 걸어도 ${CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd}개월 걸립니다.`;
+  if (k.yard > 0.92) return `야드가 ${Math.round(k.yard * 100)}% 찼습니다. 더 들어오면 동선이 막혀 가동률이 떨어집니다.`;
+  if (W.equip < 50) return `설비 상태 ${equipLabel(W.equip)}, 정비 후 ${W.maintAge}개월째입니다. 고장 위험권입니다.`;
+  if (k.pace != null && k.pace < 0.85) return `본사 목표 페이스 ${Math.round(k.pace * 100)}%입니다. 연말 평가에 그대로 남습니다.`;
+  const worst = Object.keys(CUST).filter(x => (s.custShare[x] || 0) > 0.05)
+    .sort((a, b) => W.rel[a] - W.rel[b])[0];
+  if (worst && W.rel[worst] < 45) return `${cname(worst)} 관계가 ${relLabel(W.rel[worst])}입니다. 더 내려가면 물량이 넘어갑니다.`;
+  if (W.fatigue > 50) return `현장 피로가 한계입니다. 사람이 나가기 시작하면 캐파가 빠집니다.`;
+  return '당장 눈에 띄는 위험은 없습니다. 그럴 때 정비와 재고를 보는 겁니다.';
+}
+
 function showReport(R) {
   const dlg = document.createElement('dialog');
   const shipped = Object.values(R.shipped).reduce((a, b) => a + b, 0);
   const ordered = Object.values(R.demandAuto).reduce((a, b) => a + b, 0);
-  const lines = [...(R.phaseChange ? [R.phaseChange] : []), ...R.flags, ...R.log];
+  /* 월별 사건을 날짜순으로 정리하고 같은 경고는 묶는다.
+     한 분기에 같은 말이 세 번 나오면 그건 세 건이 아니라 한 건이 석 달 간 것이다. */
+  const raw = [...(R.phaseChange ? [R.phaseChange] : []), ...R.flags, ...R.log];
+  const seen = new Map();
+  for (const t of raw) {
+    const key = String(t).replace(/[\d,]+/g, '#');
+    if (seen.has(key)) { seen.get(key).n++; if (!seen.get(key).all.includes(t)) seen.get(key).all.push(t); }
+    else seen.set(key, { text: t, n: 1, all: [t] });
+  }
+  const lines = [...seen.values()];
+
+  // 직전 기간 대비
+  const mpt = R.months || 1;
+  const hist = G.s.history;
+  const prev = hist.slice(-mpt * 2, -mpt);
+  const sum = (a, k) => a.reduce((x, r) => x + (r[k] || 0), 0);
+  const dOp = prev.length ? R.op - sum(prev, 'op') : null;
+  const causes = reportCauses(R);
+  const risk = nextRisk(G.s, G.W);
+
   dlg.innerHTML = `<div class="dlg">
     <h2>${R.months > 1 ? periodLabel(R.firstTurn, 3) : R.date} 결산${R.months > 1 ? ` <span class="muted" style="font-size:13px">${R.months}개월 합계</span>` : ''}</h2>
-    <table><tr><td>본사 주문</td><td>${fmt(ordered)} 톤</td></tr>
-      <tr class="tot"><td>납품</td>
-        <td class="${shipped < ordered * .95 ? 'v neg' : 'v pos'}">${fmt(shipped)} 톤</td></tr></table>
-    <div class="sep"></div>
+
+    <div class="rhead">
+      <div class="rbox">
+        <span class="rl">${R.months > 1 ? '이번 분기' : '이번 달'} 영업이익</span>
+        <span class="rv ${R.op < 0 ? 'bad' : 'good'}">${money(R.op)}</span>
+        <span class="rn">${dOp == null ? '비교할 직전 기간 없음'
+          : `직전 대비 ${dOp >= 0 ? '▲ +$' : '▼ −$'}${money1k(Math.abs(dOp))}`}</span>
+      </div>
+      <div class="rbox">
+        <span class="rl">납품 / 주문</span>
+        <span class="rv ${shipped < ordered * .95 ? 'bad' : 'good'}">${fmt(shipped)}t</span>
+        <span class="rn">주문 ${fmt(ordered)}t 중 ${Math.round(shipped / Math.max(1, ordered) * 100)}%</span>
+      </div>
+      <div class="rbox">
+        <span class="rl">누계 영업이익</span>
+        <span class="rv ${G.s.cum.op < 0 ? 'bad' : 'good'}">${money(G.s.cum.op)}</span>
+        <span class="rn">적자로 끝나면 낙제입니다</span>
+      </div>
+    </div>
+
+    ${causes.length ? `<div class="rcause"><h3 class="h3">이번 결과를 만든 것 (실제 장부 금액)</h3>
+      ${causes.map(c => `<div class="rc"><span>${c.label}</span>
+        <b class="${c.amt < 0 ? 'v neg' : 'v pos'}">${c.amt < 0 ? '▼ −$' : '▲ +$'}${money1k(Math.abs(c.amt))}</b></div>`).join('')}
+      </div>` : ''}
+
+    <div class="rrisk"><b>다음 ${R.months > 1 ? '분기' : '달'} 위험</b> — ${risk}</div>
+
+    ${G.W && G.W.fired.length ? `<h3 class="h3">돌아온 청구서</h3>${G.W.fired.map(f =>
+      `<div class="note bad"><b>${f.text}</b>${f.why ? `<br><span class="muted">원인 · ${f.why}</span>` : ''}</div>`).join('')}` : ''}
+
+    <details class="fold"><summary>손익 상세</summary>
     <table>
       <tr><td>매출액</td><td>${money(R.revenue)}</td></tr>
       <tr><td>매출총이익</td><td>${money(R.gp)}</td></tr>
@@ -1727,11 +2006,13 @@ function showReport(R) {
         <td class="${R.op < 0 ? 'v neg' : ''}">${money(R.op)}</td></tr>
       <tr class="tot"><td>모법이익 <span class="muted" style="font-weight:600">모사 이익 + 코일센터 이익</span></td>
         <td class="${R.consolidated < 0 ? 'v neg' : 'v pos'}">${money(R.consolidated)}</td></tr></table>
+    </details>
     ${R.lineReady ? `<div class="note good">${R.lineReady}</div>` : ''}
-    ${G.W && G.W.fired.length ? `<div class="sep"></div><h2>돌아온 청구서</h2>${G.W.fired.map(f =>
-      `<div class="note bad"><b>${f.text}</b>${f.why ? `<br><span class="muted">원인 · ${f.why}</span>` : ''}</div>`).join('')}` : ''}
-    ${lines.length ? `<div class="sep"></div>${lines.map(t =>
-      `<div class="note ${/결품|넘겼|막혀|모자|대손|떠나|부도|클레임|넘어갔|나갔/.test(t) ? 'bad' : ''}">${t}</div>`).join('')}` : ''}
+    ${lines.length ? `<details class="fold"><summary>이 기간에 일어난 일 (${lines.length}건)</summary>
+      ${lines.map(x => `<div class="note ${/결품|넘겼|막혀|모자|대손|떠나|부도|클레임|넘어갔|나갔/.test(x.text) ? 'bad' : ''}">${
+        x.all.length > 1 ? x.all[x.all.length - 1] : x.text}${
+        x.n > 1 ? ` <span class="muted">· ${x.n}개월 연속</span>` : ''}</div>`).join('')}
+      </details>` : ''}
     <div class="ok"><button class="primary" id="close">확인</button></div></div>`;
   dlg.addEventListener('cancel', e => e.preventDefault());
   document.body.appendChild(dlg);

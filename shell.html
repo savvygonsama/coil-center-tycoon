@@ -492,9 +492,9 @@
 
   .imps{display:flex;flex-direction:column;gap:10px}
   .imp b{font-size:15px}
-  .warns .warn{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px dashed var(--line)}
-  .warns .warn i{font-style:normal;font-family:var(--px);font-size:13px;color:var(--rust);white-space:nowrap}
-  .warns .warn span{font-size:14.5px}
+  .warns .warn,.urg .warn{display:flex;gap:10px;align-items:baseline;padding:6px 0;border-bottom:1px dashed var(--line)}
+  .warns .warn i,.urg .warn i{font-style:normal;font-family:var(--px);font-size:13px;color:var(--rust);white-space:nowrap}
+  .warns .warn span,.urg .warn span{font-size:14.5px}
 
   .briefs{display:flex;flex-direction:column;gap:10px}
   .brief{display:flex;gap:12px;align-items:flex-start}
@@ -525,7 +525,85 @@
     .custbar .leak{grid-column:1 / -1;text-align:right;margin-top:-4px} }
 
   /* 발주 미리보기 — 부작용 없는 예측이라 색만으로 말하지 않고 숫자와 단어를 같이 쓴다 */
-  .fx .fxm{font-style:normal;font-weight:900;margin-right:1px}
+  /* ▲▼⚠ 는 픽셀 폰트에 없어 두부로 나온다. 본문 폰트로 강제한다. */
+  .fx .fxm{font-family:var(--sans);font-style:normal;font-weight:900;margin-right:2px;
+    display:inline;letter-spacing:0}
+  .warns .warn i,.urg .warn i,.ctx .ck{font-family:var(--sans)}
+
+  /* 메인 화면 — 목표·긴급, 핵심 지표, 지난 결과 순서 */
+  .card.goal{border-width:3px}
+  .goalrow{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:10px}
+  .gbox{flex:1 1 220px;border:2px solid var(--line);background:var(--panel2);padding:9px 12px}
+  .gbox .gl{display:block;font-size:12px;color:var(--dim);font-weight:700}
+  .gbox .gv{display:block;font-size:22px;font-weight:900;font-variant-numeric:tabular-nums;margin:2px 0}
+  .gbox .gv.bad{color:var(--rust)} .gbox .gv.good{color:var(--teal)}
+  .gbox .gn{display:block;font-size:11.5px;color:var(--dim);font-weight:600}
+  .gbox .gn.bad{color:var(--rust);font-weight:800}
+  .urg{display:grid;gap:5px} .urg.none{color:var(--dim);font-size:13px;font-weight:700}
+
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:10px;margin:0 0 14px}
+  .kpi{border:2px solid var(--ink);background:var(--panel);padding:9px 11px}
+  .kpi .kl{display:block;font-size:11.5px;color:var(--dim);font-weight:800}
+  .kpi .kv{display:block;font-size:21px;font-weight:900;font-variant-numeric:tabular-nums;margin:1px 0}
+  .kpi .ks{display:block;font-size:11px;font-weight:700;color:var(--dim)}
+  .kpi.k-good{border-left:7px solid var(--teal)} .kpi.k-good .kv{color:var(--teal)}
+  .kpi.k-warn{border-left:7px solid #b8860b} .kpi.k-warn .kv{color:#8a6410}
+  .kpi.k-bad{border-left:7px solid var(--rust)} .kpi.k-bad .kv{color:var(--rust)}
+
+  .card.tops .top{border-left:5px solid var(--line);padding:6px 0 6px 10px;margin-bottom:7px}
+  .card.tops .top.bill{border-left-color:var(--rust)}
+  .card.tops .top b{display:block;font-size:14.5px}
+  .card.tops .fx{margin-top:5px}
+  .card.tops .top span{font-size:12px;color:var(--dim);font-weight:600}
+
+  details.fold{margin:0 0 14px;border:2px solid var(--line);background:var(--panel2)}
+  details.fold>summary{cursor:pointer;padding:9px 14px;font-weight:900;font-size:14px;
+    font-family:var(--px);list-style:none}
+  details.fold>summary::before{content:'▸ ';font-family:var(--sans)}
+  details.fold[open]>summary::before{content:'▾ '}
+  details.fold[open]{padding-bottom:2px}
+  details.fold>*:not(summary){margin-left:10px;margin-right:10px}
+
+  /* 결산 첫 화면 */
+  .rhead{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin:2px 0 12px}
+  .rbox{border:2px solid var(--ink);background:var(--panel2);padding:8px 11px}
+  .rbox .rl{display:block;font-size:11.5px;color:var(--dim);font-weight:800}
+  .rbox .rv{display:block;font-size:21px;font-weight:900;font-variant-numeric:tabular-nums}
+  .rbox .rv.bad{color:var(--rust)} .rbox .rv.good{color:var(--teal)}
+  .rbox .rn{display:block;font-size:11px;color:var(--dim);font-weight:700}
+  .rcause{margin:0 0 12px}
+  .rc{display:flex;justify-content:space-between;gap:10px;padding:4px 0;
+    border-bottom:1px dashed var(--line);font-size:13.5px;font-weight:700}
+  .rc b{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rrisk{border:2px solid var(--rust);background:var(--rust-l);padding:8px 12px;
+    font-size:13.5px;font-weight:700;margin:0 0 12px}
+  .rrisk b{font-family:var(--px);font-size:12px;margin-right:4px}
+
+  /* 안건별 판단 근거 — 확인 / 추정 / 소문을 기호와 글자로 구분한다 */
+  .ctxs{display:grid;gap:5px;margin:0 0 12px;padding:10px 12px;
+    background:var(--panel2);border:2px solid var(--line)}
+  .ctx{display:grid;grid-template-columns:44px 1fr auto;gap:8px;align-items:baseline;font-size:13px}
+  .ctx.w .cv{color:var(--rust)}
+  .ctx .ck{font-family:var(--px);font-size:10px;padding:1px 4px;text-align:center;
+    border:1.5px solid var(--ink);white-space:nowrap}
+  .ctx .cl{color:var(--dim);font-weight:700}
+  .ctx .cv{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ctx .cn{grid-column:2 / -1;font-size:11.5px;color:var(--dim);font-weight:600;margin-top:-3px}
+
+  /* 결재 중 펼쳐보는 현황 */
+  .minis{margin:10px 0 0;border:2px dashed var(--line);background:var(--panel2)}
+  .minis summary{cursor:pointer;padding:7px 12px;font-weight:800;font-size:13px;color:var(--dim)}
+  .minis table{margin:0 12px 10px;width:calc(100% - 24px)}
+  .minis td{padding:3px 0;font-size:13px}
+  .minis td:last-child{text-align:right;font-weight:800;font-variant-numeric:tabular-nums}
+
+  /* 고른 뒤에도 질문과 선택지를 남긴다 */
+  .optlist.done button{opacity:.38;cursor:default}
+  .optlist.done button.picked{opacity:1;border-width:3px;background:var(--blue-l)}
+  .verdict.inline{margin-top:14px;border-top:3px solid var(--ink);padding-top:12px}
+  /* 사내 이야기는 작게 — 큰 경영 안건과 무게를 구분한다 */
+  .dlg.slim{max-width:520px}
+  .dlg.slim .deckq h2{font-size:19px}
   .ofc{margin-top:10px;border-top:2px dashed var(--line);padding-top:10px}
   .ordt.fct th{background:var(--panel2);color:var(--ink);font-size:11px}
   .ordt.fct td{font-size:12px;padding:4px 5px}

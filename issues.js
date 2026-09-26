@@ -620,8 +620,34 @@ function negoCard(s, W, k, L) {
     },
   });
 
+  /* 협상 테이블에 올리는 판단 근거. 전부 지금 알 수 있는 값이다.
+     경쟁사 정보만 확실성이 갈린다 — 견적서를 봤으면 확인, 흘려들었으면 소문. */
+  const avgT = custAvgTons(s)[k] || 0;
+  const nowCut = cutNow(s, W, k);
+  const lastR = s.history[s.history.length - 1];
+  const fulfil = lastR ? Object.values(lastR.shipped).reduce((a, b) => a + b, 0)
+    / Math.max(1, Object.values(lastR.demandAuto).reduce((a, b) => a + b, 0)) : 1;
+  const ctx = [
+    { kind: 'fact', label: `${cname(k)} 월평균 판매량`, value: `${fmt(Math.round(avgT))}t · 전체의 ${Math.round(I.sh * 100)}%` },
+    { kind: 'fact', label: '지금 나가는 양보 단가', value: nowCut > 0 ? `−$${nowCut}/t · 월 −$${money1k(nowCut * avgT)}` : '없음',
+      warn: nowCut >= 8 },
+    { kind: 'fact', label: '가공마진 대비', value: `톤당 $${CFG.PROC_MARGIN.SLIT + CFG.COIL_MARGIN} 중 ${nowCut} 양보 중`,
+      note: `여기서 $${ask} 더 내주면 남는 게 톤당 $${Math.max(0, CFG.PROC_MARGIN.SLIT + CFG.COIL_MARGIN - nowCut - ask)}입니다`,
+      warn: nowCut + ask >= CFG.PROC_MARGIN.SLIT },
+    { kind: 'fact', label: '관계 · 우리 품질', value: `${relLabel(I.rel)} · ${qualityPct(W.quality)}점` },
+    { kind: 'fact', label: '지난달 납기 달성', value: `${Math.round(fulfil * 100)}%`, warn: fulfil < 0.95 },
+    I.threat
+      ? { kind: 'fact', label: '경쟁사 견적', value: '실물 확인됨', warn: true,
+          note: '동결하면 물량이 실제로 빠집니다' }
+      : { kind: 'rumor', label: '경쟁사 견적', value: '확인 안 됨',
+          note: '떠보는 것일 수 있습니다. 동결해도 안 빠질 가능성이 높습니다' },
+    { kind: 'est', label: `${c.name} 물량 전망`, value: I.outlook === 'up' ? '증가' : I.outlook === 'down' ? '정체' : '보합',
+      note: I.outlook === 'down' ? '단가를 내줘도 물량은 안 따라옵니다' : null },
+    pledged ? { kind: 'fact', label: '지난 약속', value: `−$${pledged}/t 열어주기로 함`, warn: true } : null,
+  ];
+
   return {
-    id: 'w-nego-' + k, who: 'jung', topic: 'price-' + k,
+    id: 'w-nego-' + k, who: 'jung', topic: 'price-' + k, ctx,
     title: `${cname(k)} ${cycle} 단가 협상입니다`,
     text: `사장님, ${c.name} ${cycle} 단가 협상 날입니다. 계약서상 이번 달에 다시 씁니다. `
         + `${ask > 0 ? `그쪽은 톤당 $${ask} 내려 달라고 나왔습니다. ` : `이번엔 그쪽이 인하 얘기를 못 꺼냈습니다. `}`
@@ -829,8 +855,28 @@ function maintCard(s, W) {
   const why = W.deferMaint >= 1 ? `지난번에도 미뤘다 아입니꺼. 이번이 ${W.deferMaint + 1}번쨉니더.` : '';
   const hot = W.utilHist.slice(-4).filter(u => u > 0.9).length;
   const worn = W.equip < 55 && W.maintAge < 6;
+  const util = W.utilHist.slice(-1)[0] ?? 0.8;
+  const L = look(s);
+  const monthTons = Object.values(L.now).reduce((a, b) => a + b, 0);
+  /* 설비 상태에서 다음 고장까지 몇 달이나 버틸지 추정한다. 월 소모는 가동률과 피로가 정한다.
+     추정이라고 분명히 적는다 — 기계가 언제 설지는 아무도 모른다. */
+  const wear = 1.1 + Math.max(0, util - 0.72) * 13 + W.fatigue * 0.02;
+  const toLimit = Math.max(0, Math.round((W.equip - 40) / Math.max(0.5, wear)));
+  const ctx = [
+    { kind: 'fact', label: '설비 상태', value: `${equipLabel(W.equip)} (${Math.round(W.equip)}/100)`, warn: W.equip < 50 },
+    { kind: 'fact', label: '마지막 정비', value: `${W.maintAge}개월 전${W.deferMaint ? ` · ${W.deferMaint}번 미룸` : ''}`,
+      warn: W.maintAge >= 10 },
+    { kind: 'fact', label: '이번 달 부하', value: `가동률 ${Math.round(util * 100)}% · 내시 ${fmt(Math.round(monthTons))}t`,
+      warn: util > 0.9 },
+    { kind: 'est', label: '전면 정비 시 납품 영향', value: `이번 달 ${fmt(Math.round(monthTons * 0.12))}t 감소`,
+      note: '일주일 세우면 캐파의 12%가 빕니다' },
+    { kind: 'est', label: '이대로 두면', value: toLimit > 0 ? `${toLimit}개월쯤 뒤 고장 위험권` : '이미 고장 위험권',
+      warn: toLimit <= 2, note: '기계가 언제 설지는 정확히 알 수 없습니다' },
+    W.spares === false ? { kind: 'fact', label: '예비 부품', value: '없음 — 서면 열흘', warn: true } : null,
+    W.insLow ? { kind: 'fact', label: '기계 보험', value: '제외됨 — 수리비 전액 자부담', warn: true } : null,
+  ];
   return {
-    id: 'w-maint', who: 'gu', topic: 'prod',
+    id: 'w-maint', who: 'gu', topic: 'prod', ctx,
     title: worn ? '정비한 지는 얼마 안 됐는데 상태가 나쁩니다' : '라인을 세우고 정비해야 합니다',
     text: worn
       ? `사장님예, 정비는 ${W.maintAge}개월 전에 했심더. 근데 그 뒤로 ${hot >= 2 ? `${hot}달을 90% 넘게 돌리가` : '쉬지 않고 돌리가'} `
@@ -1261,8 +1307,24 @@ function solarCard(s, W) {
   const left = Math.max(1, CFG.TOTAL_TURNS - s.turn + 1);
   const capex = 520_000, save = 9_000;            // 월 $9k 절감, 약 58개월이면 본전
   const lease = 4_500;                            // 리스는 절반만 돌려받고 초기 투자는 없다
+  const payback = Math.round(capex / save);
+  const run = runway(s);
+  /* 투자 안건에 반드시 붙어야 하는 것 — 초기 비용, 월 효과, 회수 기간, 남은 임기,
+     그리고 다른 투자에 거는 제약. 임기보다 회수가 늦으면 그 사실을 먼저 말한다. */
+  const ctx = [
+    { kind: 'fact', label: '초기 비용', value: `$${money1k(capex)}` },
+    { kind: 'fact', label: '월 절감', value: `$${money1k(save)}` },
+    { kind: 'fact', label: '회수 기간', value: `${payback}개월`, warn: payback > left },
+    { kind: 'fact', label: '남은 임기', value: `${left}개월`,
+      note: payback > left ? `임기 안에는 본전을 못 뽑습니다. 임기 중 회수액은 $${money1k(save * left)}, 즉 ${Math.round(save * left / capex * 100)}%입니다`
+                           : `임기 안에 회수하고 $${money1k(save * left - capex)} 남습니다` },
+    { kind: 'fact', label: '지금 자금 여력', value: `${run.toFixed(1)}개월치`, warn: run < 2,
+      note: run < 2 ? '지금 $' + money1k(capex) + '를 빼면 다음 달 소재 대금이 빠듯합니다' : null },
+    { kind: 'fact', label: '임대형의 제약', value: '20년 계약 · 증축 시 그 지붕 사용 불가',
+      warn: true, note: '나중에 공장동을 올릴 자리가 줄어듭니다' },
+  ];
   return {
-    id: 'm-solar', who: 'seo', topic: 'solar',
+    id: 'm-solar', who: 'seo', topic: 'solar', ctx,
     title: '공장 지붕에 태양광을 깔자는 제안이 왔습니다',
     text: `저… 전기료 고지서를 정리하다가요. 지난 1년 전기료가 계속 오르고 있어요. `
         + `그래서 알아봤는데, 우리 공장 지붕이 단일경간이라 평평하고 넓어서 태양광 깔기 좋다고 합니다. `
@@ -1279,7 +1341,8 @@ function solarCard(s, W) {
           return '설치했습니다! 석 달 걸렸고요, 지난달 전기료 고지서가 처음으로 줄었어요. '
                + '제가 그거 보고 좀… 뿌듯했습니다.'; } },
       { label: '지붕만 빌려주고 전기를 싸게 산다', hint: '돈은 안 쓰고 절반만 받는다',
-        fx: ['+초기 투자 없음', `+고정비 월 $${fmt(lease / 1000)}k 절감`, '−20년 계약에 묶인다'],
+        fx: ['+초기 투자 없음', `+고정비 월 $${fmt(lease / 1000)}k 절감`, '−20년 계약에 묶인다',
+             '?증축할 때 그 지붕은 못 씁니다'],
         apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) - lease; W.solar = 'lease';
           styleAdd(W, 'cash'); remember(W, s, 'solar', '지붕 임대형 태양광');
           lever(G, '지붕 임대형 태양광', { risk: `고정비 월 $${fmt(lease / 1000)}k 절감 · 20년 계약` });

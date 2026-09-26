@@ -699,7 +699,14 @@ function resolveTurn(state, decision) {
     });
     if (d.options.salesMix) s.custQueue.push({ mix: { ...d.options.salesMix }, turn: s.turn + CFG.SALES_EFFORT_LAG });
 
-    const mix = s.salesMix || {};
+    /* 배분이 없는 판(영업 자원 배분이 생기기 전에 저장한 파일)은 "전부 무관리"가 아니라
+       "지금 비중대로 유지"로 읽는다. 저장 파일에 없던 필드 하나 때문에
+       모든 고객군이 조용히 빠지기 시작하면 그건 이어하기가 아니다. */
+    if (!s.salesMix) {
+      s.salesMix = {};
+      for (const k in CFG.CUSTOMERS) s.salesMix[k] = Math.round((s.custShare[k] || 0) * 100);
+    }
+    const mix = s.salesMix;
     const mixTot = Object.keys(CFG.CUSTOMERS).reduce((a, k) => a + Math.max(0, mix[k] || 0), 0);
     for (const k in CFG.CUSTOMERS) {
       const p = mixTot > 0 ? Math.max(0, mix[k] || 0) / mixTot : 0;
