@@ -7,6 +7,8 @@ const $ = s => document.querySelector(s);
 const app = $('#app');
 const fmt = n => Math.round(n).toLocaleString('en-US');
 const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
+// $17,610 → "18k". 천 단위가 안 되면 그냥 달러로 적는다.
+const money1k = n => Math.abs(n) >= 1000 ? fmt(Math.round(n / 1000)) + 'k' : Math.round(n).toLocaleString();
 const M = n => (n < 0 ? '−$' : '$') + (Math.abs(n) / 1e6).toFixed(1) + 'M';
 
 /* ============================================================
@@ -1443,8 +1445,13 @@ function custPanel(s) {
   return `<div class="card">
     <h2>고객군별 월평균 판매량</h2>
     ${Object.entries(CFG.CUSTOMERS).map(([k, c]) => {
-      const r = G && G.W ? G.W.rel[k] : 60, cut = G && G.W ? G.W.cut[k] : 0;
-      // 깎아준 단가 × 그 고객 월 판매량 = 매달 사라지는 이익
+      const W = G && G.W;
+      const r = W ? W.rel[k] : 60;
+      const con = W ? (W.cut[k] || 0) : 0;                       // 계약 단가 — 다음 협상까지
+      const tmp = W && W.temp && W.temp[k] && W.temp[k].until > s.turn ? W.temp[k] : null;  // 한시 인하
+      const pdg = W && W.pledge ? (W.pledge[k] || 0) : 0;        // 다음 협상에서 내주기로 한 것
+      const cut = W ? cutNow(s, W, k) : 0;          // 본사 승인 한도($12/t)까지 잘린 실제 양보액
+      // 지금 나가고 있는 양보액 × 그 고객 월 판매량 = 매달 사라지는 이익
       const leak = cut * (avg[k] || 0);
       const pts = Math.round(mix[k] || 0);
       return `<div class="custbar ${pts > 0 ? '' : 'off'}"><span>${CUST[k]} · ${c.name}</span>
@@ -1452,14 +1459,20 @@ function custPanel(s) {
         <span>월 ${fmt(Math.round(avg[k] || 0))}t</span>
         <span class="rel ${relCls(r)}">${relLabel(r)}</span>
         <span class="eff">영업 ${pts}${pts > 0 ? '' : ' · 무관리'}</span>
-        <span class="leak">${cut > 0
-          ? `단가 −$${cut}/t → 월 −$${leak >= 1000 ? fmt(Math.round(leak / 1000)) + 'k' : Math.round(leak).toLocaleString()}`
-          : cut < 0 ? `단가 +$${-cut}/t → 월 +$${fmt(Math.round(-leak / 1000))}k` : '단가 그대로'}</span>
+        <span class="leak">${cut !== 0
+          // 곱셈을 그대로 보여준다. "월 −$18k"만 있으면 어디서 나온 숫자인지 알 수가 없다.
+          ? `<b>${cut > 0 ? '−' : '+'}$${Math.abs(cut)}</b>/t × ${fmt(Math.round(avg[k] || 0))}t
+             = 월 이익 <b>${cut > 0 ? '−' : '+'}$${money1k(Math.abs(leak))}</b>`
+             + (tmp ? `<i class="tmp">한시 $${tmp.amt} 포함 · ${dateLabel(tmp.until).replace(/^\d+년 /, '')} 원복</i>` : '')
+             + (pdg ? `<i class="pdg">다음 협상 −$${pdg} 약속</i>` : '')
+          : pdg ? `단가 양보 없음<i class="pdg">다음 협상 −$${pdg} 약속</i>` : '단가 양보 없음'}</span>
       </div>`;
     }).join('')}
     <p class="hint">「영업」은 반기 영업 계획에서 나눠 준 100점입니다. 0점인 고객군은 매달 조금씩 물량이 빠집니다.${
       pend ? ` 새 배분은 ${dateLabel(pend.turn).replace(/^\d+년 /, '')}부터 숫자에 나타납니다.` : ''}<br>
-      깎아준 단가는 계약이 살아 있는 한 매달 나갑니다 — 되돌리려면 단가 협상에서 인상을 관철해야 합니다.</p>
+      단가 양보는 <b>계약 단가</b>(정기 협상에서만 바뀌고 다음 협상까지 간다)와
+      <b>한시 인하</b>(기한이 되면 자동으로 원복된다) 둘로 나뉩니다.
+      영구히 마진을 깎는 계약은 하지 않습니다 — 계약 단가를 되돌리려면 정기 협상에서 인상을 관철해야 합니다.</p>
   </div>`;
 }
 

@@ -51,6 +51,13 @@ function initWorld(s, diff) {
        장사라 이 몇 달러가 그대로 영업이익이다. 매년 1월 단가 재협상에서 절반으로 준다. */
     cut:     hard ? { JP: 5, EU: 5, CN: 2, PART: 4, HOME: 3 }
                   : { JP: 3, EU: 2, CN: 1, PART: 2, HOME: 1 },
+    /* 단가는 세 층으로 움직인다.
+       cut    계약 단가 — 정기 협상에서만 바뀌고, 다음 협상까지 간다.
+       temp   한시 인하 — 이탈을 막거나 물량을 채우려고 몇 달만 깎는 것. 만료일이 되면 자동으로 원복된다.
+              실무에서 마진을 깎는 건 대개 이쪽이다. 영구히 손해 보는 계약은 하지 않는다.
+       pledge 약속 — 다음 정기 협상에서 계약 단가에 반영하기로 예약해 둔 것. */
+    temp: {},                     // { [고객]: { amt, until } }
+    pledge: {},                   // { [고객]: 다음 협상에서 내주기로 한 $/t }
     concede: { JP: 1, EU: 1, CN: 0, PART: 1, HOME: 0 },   // 양보한 횟수. 한 번 깎아주면 또 온다
     relHigh: { JP: 0, EU: 0, CN: 0, PART: 0, HOME: 0 },
     threat: {},                   // 이번 달 경쟁사가 실제로 들어간 고객 (숨김)
@@ -160,12 +167,26 @@ function normalizeShare(s) {
 function topCust(s) {
   return Object.keys(CUST).sort((a, b) => (s.custShare[b] || 0) - (s.custShare[a] || 0))[0];
 }
+/* 지금 그 고객에 실제로 나가고 있는 톤당 양보액 = 계약 단가 + 아직 안 끝난 한시 인하.
+   한 고객에 톤당 $12 넘게 깎아주는 건 계약이든 한시든 본사가 승인하지 않는다 —
+   가공마진 자체가 톤당 $40이라 이 선을 넘으면 팔수록 손해가 된다. */
+function cutNow(s, W, k) {
+  const t = (W.temp || {})[k];
+  const live = t && t.until > s.turn ? t.amt : 0;
+  return Math.min(12, (W.cut[k] || 0) + live);
+}
 function standingCut(s, W) {
   let c = 0;
-  // 한 고객에 톤당 $12 넘게 깎아주는 계약은 본사가 승인하지 않는다.
-  // 가공마진 자체가 톤당 $40이라, 이 선을 넘으면 팔수록 손해가 된다.
-  for (const k in CUST) { W.cut[k] = Math.min(12, W.cut[k] || 0); c += (s.custShare[k] || 0) * W.cut[k]; }
+  for (const k in CUST) { W.cut[k] = Math.min(12, W.cut[k] || 0); c += (s.custShare[k] || 0) * cutNow(s, W, k); }
   return c;
+}
+/* 한시 인하를 건다. 같은 고객에 이미 걸려 있으면 큰 쪽·늦은 쪽으로 덮어쓴다. */
+function tempCut(W, s, k, amt, months) {
+  W.temp = W.temp || {};
+  const old = W.temp[k];
+  W.temp[k] = { amt: Math.min(12, Math.max(amt, old && old.until > s.turn ? old.amt : 0)),
+                until: Math.max(s.turn + months, old ? old.until : 0) };
+  return W.temp[k];
 }
 /* 지금 시점의 재고·재원 (결재 직전 기준)
    이번 달에 도착하는 배는 지금 바다 위에 있다. 그 뒤로 오는 건 아직 본사 공장에 있다. */
@@ -300,13 +321,16 @@ function worldPost(s, W, R, G) {
 
   // 10. 한 번 깎아준 기억은 천천히 옅어진다
   if (s.turn % 8 === 0) for (const k in CUST) W.concede[k] = Math.max(0, W.concede[k] - 1);
-  // 연간 단가 재협상 — 깎아준 단가는 해가 바뀌면 절반쯤 되돌릴 수 있다. 전부는 못 돌린다.
-  if (s.turn % 12 === 0) {
-    const back = Object.keys(CUST).filter(k => W.cut[k] > 0);
-    if (back.length) {
-      for (const k of back) { W.cut[k] = Math.round(W.cut[k] * 0.5); W.rel[k] = wClamp(W.rel[k] - 3); }
-      fire(W, s, 'renego', `연간 단가 재협상 — ${back.map(k => CUST[k]).join('·')}에 깎아준 단가의 절반을 되돌렸습니다. 고객들은 불만입니다.`,
-        '그동안 해준 가격 양보');
+  /* 한시 인하는 기한이 되면 스스로 끝난다. 영구히 마진을 깎는 계약은 이 회사에 없다.
+     계약 단가(W.cut)는 여기서 건드리지 않는다 — 그건 정기 단가 협상 자리에서만 바뀐다.
+     예전에는 매년 12월에 몰래 절반을 되돌렸는데, 그러면 사장이 협상에서 이긴 건지
+     달력이 넘어간 건지 구분이 안 됐다. */
+  for (const k in CUST) {
+    const t = (W.temp || {})[k];
+    if (t && t.until === s.turn) {
+      fire(W, s, 'tempEnd', `${cname(k)} 한시 인하 $${t.amt}/t가 끝났습니다. 단가가 계약 수준으로 돌아갑니다.`,
+        `${t.amt >= 5 ? '이탈 방지' : '물량 확보'}용 한시 인하`);
+      delete W.temp[k];
     }
   }
 

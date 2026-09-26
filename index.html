@@ -516,6 +516,9 @@
   .custbar.off .fill{opacity:.45}
   .custbar .leak{font-size:12.5px;color:var(--dim);white-space:nowrap;font-weight:700;
     font-variant-numeric:tabular-nums}
+  .custbar .leak i{display:block;font-style:normal;font-size:11px;font-weight:800;margin-top:1px}
+  .custbar .leak i.tmp{color:var(--ochre,#8a6410)}
+  .custbar .leak i.pdg{color:var(--rust)}
   .rel.up{background:var(--teal-l);color:var(--teal)} .rel.neu{background:var(--panel2);color:var(--dim)}
   .rel.dn{background:var(--rust-l);color:var(--rust)}
   @media(max-width:760px){ .custbar{grid-template-columns:120px 1fr 62px 72px 84px;font-size:13px}
@@ -2292,6 +2295,13 @@ function initWorld(s, diff) {
        장사라 이 몇 달러가 그대로 영업이익이다. 매년 1월 단가 재협상에서 절반으로 준다. */
     cut:     hard ? { JP: 5, EU: 5, CN: 2, PART: 4, HOME: 3 }
                   : { JP: 3, EU: 2, CN: 1, PART: 2, HOME: 1 },
+    /* 단가는 세 층으로 움직인다.
+       cut    계약 단가 — 정기 협상에서만 바뀌고, 다음 협상까지 간다.
+       temp   한시 인하 — 이탈을 막거나 물량을 채우려고 몇 달만 깎는 것. 만료일이 되면 자동으로 원복된다.
+              실무에서 마진을 깎는 건 대개 이쪽이다. 영구히 손해 보는 계약은 하지 않는다.
+       pledge 약속 — 다음 정기 협상에서 계약 단가에 반영하기로 예약해 둔 것. */
+    temp: {},                     // { [고객]: { amt, until } }
+    pledge: {},                   // { [고객]: 다음 협상에서 내주기로 한 $/t }
     concede: { JP: 1, EU: 1, CN: 0, PART: 1, HOME: 0 },   // 양보한 횟수. 한 번 깎아주면 또 온다
     relHigh: { JP: 0, EU: 0, CN: 0, PART: 0, HOME: 0 },
     threat: {},                   // 이번 달 경쟁사가 실제로 들어간 고객 (숨김)
@@ -2401,12 +2411,26 @@ function normalizeShare(s) {
 function topCust(s) {
   return Object.keys(CUST).sort((a, b) => (s.custShare[b] || 0) - (s.custShare[a] || 0))[0];
 }
+/* 지금 그 고객에 실제로 나가고 있는 톤당 양보액 = 계약 단가 + 아직 안 끝난 한시 인하.
+   한 고객에 톤당 $12 넘게 깎아주는 건 계약이든 한시든 본사가 승인하지 않는다 —
+   가공마진 자체가 톤당 $40이라 이 선을 넘으면 팔수록 손해가 된다. */
+function cutNow(s, W, k) {
+  const t = (W.temp || {})[k];
+  const live = t && t.until > s.turn ? t.amt : 0;
+  return Math.min(12, (W.cut[k] || 0) + live);
+}
 function standingCut(s, W) {
   let c = 0;
-  // 한 고객에 톤당 $12 넘게 깎아주는 계약은 본사가 승인하지 않는다.
-  // 가공마진 자체가 톤당 $40이라, 이 선을 넘으면 팔수록 손해가 된다.
-  for (const k in CUST) { W.cut[k] = Math.min(12, W.cut[k] || 0); c += (s.custShare[k] || 0) * W.cut[k]; }
+  for (const k in CUST) { W.cut[k] = Math.min(12, W.cut[k] || 0); c += (s.custShare[k] || 0) * cutNow(s, W, k); }
   return c;
+}
+/* 한시 인하를 건다. 같은 고객에 이미 걸려 있으면 큰 쪽·늦은 쪽으로 덮어쓴다. */
+function tempCut(W, s, k, amt, months) {
+  W.temp = W.temp || {};
+  const old = W.temp[k];
+  W.temp[k] = { amt: Math.min(12, Math.max(amt, old && old.until > s.turn ? old.amt : 0)),
+                until: Math.max(s.turn + months, old ? old.until : 0) };
+  return W.temp[k];
 }
 /* 지금 시점의 재고·재원 (결재 직전 기준)
    이번 달에 도착하는 배는 지금 바다 위에 있다. 그 뒤로 오는 건 아직 본사 공장에 있다. */
@@ -2541,13 +2565,16 @@ function worldPost(s, W, R, G) {
 
   // 10. 한 번 깎아준 기억은 천천히 옅어진다
   if (s.turn % 8 === 0) for (const k in CUST) W.concede[k] = Math.max(0, W.concede[k] - 1);
-  // 연간 단가 재협상 — 깎아준 단가는 해가 바뀌면 절반쯤 되돌릴 수 있다. 전부는 못 돌린다.
-  if (s.turn % 12 === 0) {
-    const back = Object.keys(CUST).filter(k => W.cut[k] > 0);
-    if (back.length) {
-      for (const k of back) { W.cut[k] = Math.round(W.cut[k] * 0.5); W.rel[k] = wClamp(W.rel[k] - 3); }
-      fire(W, s, 'renego', `연간 단가 재협상 — ${back.map(k => CUST[k]).join('·')}에 깎아준 단가의 절반을 되돌렸습니다. 고객들은 불만입니다.`,
-        '그동안 해준 가격 양보');
+  /* 한시 인하는 기한이 되면 스스로 끝난다. 영구히 마진을 깎는 계약은 이 회사에 없다.
+     계약 단가(W.cut)는 여기서 건드리지 않는다 — 그건 정기 단가 협상 자리에서만 바뀐다.
+     예전에는 매년 12월에 몰래 절반을 되돌렸는데, 그러면 사장이 협상에서 이긴 건지
+     달력이 넘어간 건지 구분이 안 됐다. */
+  for (const k in CUST) {
+    const t = (W.temp || {})[k];
+    if (t && t.until === s.turn) {
+      fire(W, s, 'tempEnd', `${cname(k)} 한시 인하 $${t.amt}/t가 끝났습니다. 단가가 계약 수준으로 돌아갑니다.`,
+        `${t.amt >= 5 ? '이탈 방지' : '물량 확보'}용 한시 인하`);
+      delete W.temp[k];
     }
   }
 
@@ -3134,15 +3161,20 @@ function hqMidCard(s, W) {
         `방법은 있습니다. 제가 못 가져오는 물량은 없습니다. ` +
         `다만 방법이 전부 우리 주머니에서 나간다는 게 문제입니다.`,
     opts: [
-      { label: `${CUST[top2[0]]}·${CUST[top2[1]]}에 단가를 낮춰 물량을 늘린다`, hint: '본사 실적 ↑, 우리 이익 ↓',
-        fx: ['+판매량·모사 소재 판매 ↑', '−두 고객 단가 −$4/t (계속 유지)', '?가동률 ↑ → 설비·품질 부담'],
+      /* 하반기 만회용 밀어내기는 본질적으로 한시다. 계약 단가를 영구히 내리는 게 아니라
+         연말까지만 깎아서 물량을 당겨오는 것이다. 여섯 달 뒤 자동으로 원복된다. */
+      { label: `${CUST[top2[0]]}·${CUST[top2[1]]}에 연말까지 한시 인하로 물량을 당긴다`, hint: '본사 실적 ↑, 우리 이익 ↓',
+        fx: ['+판매량·모사 소재 판매 ↑', '−두 고객 단가 −$4/t · 여섯 달 한시', '?가동률 ↑ → 설비·품질 부담'],
         apply: (s, G) => {
-          let v = 1;
-          for (const k of top2) { W.cut[k] += 4; W.concede[k]++; v *= growCust(s, k, 0.18); W.rel[k] = wClamp(W.rel[k] + 4); }
-          W.stats.concessions += 2; styleAdd(W, 'hq', 2); styleAdd(W, 'grow');
-          remember(W, s, 'volume', `하반기 본사 물량 만회용 단가 인하`, { cust: top2[0] });
-          lever(G, '하반기 물량 만회 — 단가 인하', { vol: v, cut: [top2[0], 4], rel: [[top2[0], 4], [top2[1], 4]], risk: '2~4개월 뒤 설비·품질 부담' });
-          return '두 군데 톤당 4불씩 내렸습니다. 물량 옵니다, 그건 확실합니다. 본사 소재 판매도 같이 올라갑니다. 대신 우리 이익은 얇아집니다. 그건 제 책임이 아니라 사장님 결재입니다.';
+          let v = 1, until = 0;
+          for (const k of top2) { const t = tempCut(W, s, k, 4, 6); until = t.until;
+            v *= growCust(s, k, 0.18); W.rel[k] = wClamp(W.rel[k] + 4); }
+          styleAdd(W, 'hq', 2); styleAdd(W, 'grow');
+          remember(W, s, 'volume', `하반기 본사 물량 만회용 한시 인하`, { cust: top2[0] });
+          lever(G, '하반기 물량 만회 — 여섯 달 한시 인하', { vol: v, rel: [[top2[0], 4], [top2[1], 4]],
+            risk: `${dateLabel(until)}에 원복 · 2~4개월 뒤 설비·품질 부담` });
+          return `두 군데 톤당 4불씩, ${dateLabel(until)}까지만 내렸습니다. 물량 옵니다, 그건 확실합니다. `
+               + `본사 소재 판매도 같이 올라갑니다. 대신 그때까지 우리 이익은 얇아집니다. 이건 제 책임이 아니라 사장님 결재입니다.`;
         } },
       { label: '소재를 미리 사서 재고로 쌓는다', hint: '본사 숫자만 맞춘다',
         fx: ['+본사 소재 판매 즉시 ↑', '−현금이 창고에 묶임', '?값이 내리면 손실'],
@@ -3328,11 +3360,15 @@ function negoIntel(s, W, k) {
 function negoCard(s, W, k, L) {
   const c = CFG.CUSTOMERS[k], I = negoIntel(s, W, k);
   const cycle = NEGO_CYCLE[k];
+  /* 이탈 위기 때 "다음 협상에서 열어드리겠습니다"라고 해놨으면, 그 청구서가 여기서 돌아온다.
+     단가가 협상 자리 밖에서 움직이지 않게 하려고 만든 장치다 —
+     다른 카드는 약속만 할 수 있고, 값은 언제나 이 자리에서 치른다. */
+  const pledged = (W.pledge || {})[k] || 0;
 
   /* 고객이 부르는 값 — 시황·경쟁·의존도가 정한다. 가공마진이 톤당 $40인 장사라
      여기서 $6을 내주면 그 고객 마진의 15%가 한 번에 날아간다. */
-  const ask = Math.max(0, Math.min(7,
-    2 + (I.slack ? 2 : 0) + (I.threat ? 2 : 0) + (I.comp > 50 ? 1 : 0) + (I.dep ? 1 : 0) - (I.tight ? 2 : 0)));
+  const ask = Math.max(pledged, Math.max(0, Math.min(7,
+    2 + (I.slack ? 2 : 0) + (I.threat ? 2 : 0) + (I.comp > 50 ? 1 : 0) + (I.dep ? 1 : 0) - (I.tight ? 2 : 0))));
   /* 우리가 올려 부를 수 있는 값 */
   const up = Math.max(2, Math.min(6, 2 + (I.tight ? 2 : 0) + (I.pmUp ? 1 : 0) + (I.cut >= 6 ? 1 : 0)));
 
@@ -3348,6 +3384,8 @@ function negoCard(s, W, k, L) {
 
   /* 정 부장이 들고 온 정보. 하나하나가 위 숫자의 근거다. */
   const intel = [
+    pledged ? `그리고 이건 먼저 말씀드려야겠습니다 — 지난번에 사장님이 이번 협상에서 열어주시겠다고 하셨습니다. `
+            + `그쪽 구매팀장이 그때 적어둔 수첩을 그대로 펴놓고 앉아 있습니다.` : '',
     I.threat
       ? `먼저 확인된 것부터 말씀드립니다. 경쟁사가 진짜로 견적을 넣었습니다. 사본을 봤습니다.`
       : I.comp > 50
@@ -3368,6 +3406,7 @@ function negoCard(s, W, k, L) {
 
   const close = (label, tag, msg, fxObj) => (st, G) => {
     W.negoTurn = W.negoTurn || {}; W.negoTurn[k] = st.turn;
+    if (W.pledge) delete W.pledge[k];        // 약속은 이 자리에서 끝난다 — 지켰든 깼든
     remember(W, st, tag, label, { cust: k });
     lever(G, label, fxObj);
     return msg;
@@ -3380,7 +3419,8 @@ function negoCard(s, W, k, L) {
     label: `톤당 $${ask} 내주고 물량 확대를 문서로 받는다`,
     hint: I.outlook === 'up' ? '크는 고객이다 — 물량이 따라온다'
         : I.outlook === 'down' ? '쪼그라드는 고객이다 — 물량이 안 온다' : '물량은 조금 는다',
-    fx: [`−${CUST[k]} 단가 −$${ask}/t (계속)`, `+물량 ${I.outlook === 'up' ? '크게 ↑' : I.outlook === 'down' ? '거의 그대로' : '↑'}`,
+    fx: [`−${CUST[k]} 계약 단가 −$${ask}/t · 다음 ${cycle} 협상까지`,
+         `+물량 ${I.outlook === 'up' ? '크게 ↑' : I.outlook === 'down' ? '거의 그대로' : '↑'}`,
          I.full ? '?라인이 꽉 차 있어 다 못 만든다' : `+${CUST[k]} 관계 ↑`],
     apply: (st, G) => {
       W.cut[k] += ask; W.concede[k]++; W.stats.concessions++;
@@ -3396,13 +3436,22 @@ function negoCard(s, W, k, L) {
     },
   });
 
-  /* 2) 동결 — 경쟁사 견적이 진짜면 값을 치른다 */
+  /* 2) 동결 — 경쟁사 견적이 진짜면 값을 치른다. 약속을 해뒀다면 그걸 깨는 자리가 된다. */
   opts.push({
-    label: '현행 단가 동결로 버틴다',
-    hint: I.threat ? '경쟁사 견적이 진짜다 — 위험하다' : '경쟁사 얘기는 떠보는 것 같다',
-    fx: ['+단가 지킴', I.threat ? `?${CUST[k]} 물량 이탈 위험 큼` : `?${CUST[k]} 서운함`],
+    label: pledged ? '약속을 뒤집고 현행 단가로 동결한다' : '현행 단가 동결로 버틴다',
+    hint: pledged ? '약속을 깬다 — 관계가 무너진다'
+        : I.threat ? '경쟁사 견적이 진짜다 — 위험하다' : '경쟁사 얘기는 떠보는 것 같다',
+    fx: ['+단가 지킴', pledged ? `?${CUST[k]} 관계 급락 · 물량 큰 폭 이탈`
+       : I.threat ? `?${CUST[k]} 물량 이탈 위험 큼` : `?${CUST[k]} 서운함`],
     apply: (st, G) => {
       styleAdd(W, 'cash');
+      if (pledged) {
+        const v = growCust(st, k, -0.30); W.rel[k] = wClamp(W.rel[k] - 20);
+        return close(`${CUST[k]} 약속 파기 — 동결`, 'renege',
+          `약속을 뒤집었습니다. 구매팀장이 수첩을 덮고 아무 말 없이 일어섰습니다. `
+          + `물량이 크게 빠졌고, 이 회사에서 제 얼굴은 당분간 안 팔립니다.`,
+          { vol: v, rel: [[k, -20]], risk: '관계 회복에 1년' })(st, G);
+      }
       if (I.threat) {
         const v = growCust(st, k, -0.22); W.rel[k] = wClamp(W.rel[k] - 8);
         return close(`${CUST[k]} 동결 — 물량 이탈`, 'hold',
@@ -3415,8 +3464,9 @@ function negoCard(s, W, k, L) {
     },
   });
 
-  /* 3) 인상 요구 — 이 게임에서 마진을 되돌릴 수 있는 유일한 자리 */
-  opts.push({
+  /* 3) 인상 요구 — 이 게임에서 마진을 되돌릴 수 있는 유일한 자리.
+     내려주겠다고 약속해 놓고 올려달라고 할 수는 없으니, 약속이 걸려 있으면 이 선택지는 없다. */
+  if (!pledged) opts.push({
     label: `톤당 $${up} 인상을 요구한다`,
     hint: `통할 확률 대략 ${Math.round(upP * 100)}% — ${I.tight ? '시황이 받쳐준다' : I.slack ? '시황이 안 받쳐준다' : '반반이다'}`,
     fx: [`+통하면 ${CUST[k]} 단가 +$${up}/t`, '?실패하면 관계 악화 · 물량 일부 이탈'],
@@ -3437,8 +3487,9 @@ function negoCard(s, W, k, L) {
     },
   });
 
-  /* 4) 품질·납기로 동결을 설득 — 평소에 쌓아둔 게 있어야 나오는 선택지 */
-  if (I.quality >= 68) opts.push({
+  /* 4) 품질·납기로 동결을 설득 — 평소에 쌓아둔 게 있어야 나오는 선택지.
+     약속을 해둔 자리에서는 통하지 않는다. 그쪽은 실적 얘기를 들으러 온 게 아니다. */
+  if (I.quality >= 68 && !pledged) opts.push({
     label: '품질·납기 실적을 들고 동결을 설득한다',
     hint: `우리 품질 ${qualityPct(W.quality)}점 · 관계 ${relLabel(W.rel[k])}`,
     fx: ['+통하면 단가 유지 · 관계 ↑', '?못 받쳐주면 물량 일부 이탈'],
@@ -3835,21 +3886,29 @@ function volumeCard(s, W, k, L) {
     id: 'w-vol', who: 'jung', topic: 'vol',
     title: `${cname(k)}가 물량을 더 주겠답니다`,
     text: `사장님, 이거 큽니다! ${CUST[k]}가 물량을 ${Math.round(pct * 100)}% 더 주겠답니다. `
-        + `조건은 톤당 $${cut} 인하. 딱 그것뿐입니다. 제가 두 달 붙어서 만든 자리입니다. `
+        + `조건은 다음 정기 단가 협상에서 톤당 $${cut}을 반영해 달라는 겁니다 — `
+        + `계약 단가를 기간 중에 고칠 수는 없으니까요. 제가 두 달 붙어서 만든 자리입니다. `
         + `모사 소재 판매도 같이 올라갑니다. 본사에서도 좋아할 겁니다.${gu}`,
     opts: [
-      { label: '전량 받는다', hint: '성장',
-        fx: ['+판매량 ↑ · 본사 소재 판매 ↑', `−${CUST[k]} 단가 −$${cut}/t`, '?가동률 ↑ → 설비·품질 부담'],
-        apply: (s, G) => { const v = growCust(s, k, pct); W.cut[k] += cut; W.rel[k] = wClamp(W.rel[k] + 6);
+      /* 값은 이 자리에서 치르지 않는다. 다음 정기 협상에 청구서로 돌아온다.
+         물량은 지금부터 오고 단가는 나중에 내려간다 — 그사이에 라인이 버티는지가 진짜 시험이다. */
+      { label: '전량 받는다', hint: '물량은 지금, 단가는 다음 협상에서',
+        fx: ['+판매량 ↑ · 본사 소재 판매 ↑', `−다음 ${cname(k)} 정기 협상에서 $${cut}/t 요구`, '?가동률 ↑ → 설비·품질 부담'],
+        apply: (s, G) => { const v = growCust(s, k, pct); W.rel[k] = wClamp(W.rel[k] + 6);
+          W.pledge = W.pledge || {}; W.pledge[k] = Math.max(W.pledge[k] || 0, cut);
           styleAdd(W, 'grow', 2); styleAdd(W, 'hq');
           remember(W, s, 'volume', `${CUST[k]} 대량 수주`, { cust: k });
-          lever(G, `${CUST[k]} 대량 수주`, { vol: v, cut: [k, cut], rel: [[k, 6]], risk: '2~4개월 뒤 설비·품질 부담' });
-          return `전량 잡았습니다. 이런 건 망설이면 경쟁사가 가져갑니다. 석 달쯤 뒤에 라인이 버티는지 보면 됩니다.`; } },
+          lever(G, `${CUST[k]} 대량 수주`, { vol: v, rel: [[k, 6]],
+            risk: `다음 정기 협상에서 $${cut}/t 청구서 · 2~4개월 뒤 설비·품질 부담` });
+          return `전량 잡았습니다. 이런 건 망설이면 경쟁사가 가져갑니다. 단가는 다음 협상 때 얘기가 나올 겁니다. `
+               + `석 달쯤 뒤에 라인이 버티는지 보면 됩니다.`; } },
       { label: '절반만 받는다', hint: '감당할 만큼',
-        fx: ['+판매량 조금 ↑', `−${CUST[k]} 단가 −$${Math.round(cut / 2)}/t`],
-        apply: (s, G) => { const v = growCust(s, k, pct / 2); W.cut[k] += Math.round(cut / 2); W.rel[k] = wClamp(W.rel[k] + 2);
+        fx: ['+판매량 조금 ↑', `−다음 ${cname(k)} 정기 협상에서 $${Math.round(cut / 2)}/t 요구`],
+        apply: (s, G) => { const v = growCust(s, k, pct / 2); W.rel[k] = wClamp(W.rel[k] + 2);
+          W.pledge = W.pledge || {}; W.pledge[k] = Math.max(W.pledge[k] || 0, Math.round(cut / 2));
           styleAdd(W, 'grow'); remember(W, s, 'volume-half', `${CUST[k]} 물량 절반 수주`, { cust: k });
-          lever(G, `${CUST[k]} 물량 절반 수주`, { vol: v, cut: [k, Math.round(cut / 2)], rel: [[k, 2]] });
+          lever(G, `${CUST[k]} 물량 절반 수주`, { vol: v, rel: [[k, 2]],
+            risk: `다음 정기 협상에서 $${Math.round(cut / 2)}/t 청구서` });
           return '절반만 받았습니다. 반쪽짜리 답이라 저는 안 좋아합니다만, 라인이 못 버티면 그것도 답이지요.'; } },
       { label: '정중히 사양한다', hint: '마진과 라인을 지킨다',
         fx: ['+마진·설비 지킴', `−${CUST[k]} 서운함`],
@@ -3906,19 +3965,43 @@ function churnCard(s, W, k) {
           remember(W, s, 'visit', `${CUST[k]} 사장 방문`, { cust: k });
           lever(G, `${CUST[k]} 사장 직접 방문`, { cash: -26_000, rel: [[k, 10]] });
           return `제가 직접 갔습니다. 구매 임원이 술 석 잔 들어가고 나서야 서운했던 걸 다 쏟아내더군요. 일단 잡았습니다. 이런 건 전화로는 안 됩니다.`; } },
-      { label: '단가로 붙잡는다', hint: '확실하지만 비싸다',
-        fx: [`−${CUST[k]} 단가 −$5/t (계속 유지)`, `+${CUST[k]} 관계 크게 회복`, '?다음에 또 깎아달라고 온다'],
-        apply: (s, G) => { W.cut[k] += 5; W.concede[k]++; W.rel[k] = wClamp(W.rel[k] + 18); W.stats.concessions++;
-          styleAdd(W, 'cust'); remember(W, s, 'concede', `${CUST[k]} 이탈 방지 단가 인하`, { cust: k });
-          lever(G, `${CUST[k]} 단가로 붙잡기`, { cut: [k, 5], rel: [[k, 18]], risk: '같은 고객이 또 요구할 가능성' });
-          return '깎아주고 잡았습니다. 솔직히 말씀드리면 이렇게 잡은 고객은 또 옵니다. 그래도 지금 놓치는 것보단 낫습니다.'; } },
+      /* 급한 불은 한시 인하로 끈다. 계약 단가를 영구히 내리는 게 아니다 —
+         실무에서 마진을 깎아 고객을 붙잡는 건 언제나 기한이 붙어 있다.
+         넉 달 뒤에 자동으로 원복되고, 그사이 관계를 회복해 놓지 못하면 그때 또 흔들린다. */
+      { label: '넉 달 한시 인하로 급한 불을 끈다', hint: '기한을 박고 깎는다 — 자동으로 원복된다',
+        fx: [`−${CUST[k]} 단가 −$5/t · 넉 달 한시`, `+${CUST[k]} 관계 크게 회복`,
+             '?넉 달 뒤 원복 — 그때까지 관계를 못 돌리면 다시 흔들린다'],
+        apply: (s, G) => { const t = tempCut(W, s, k, 5, 4);
+          W.rel[k] = wClamp(W.rel[k] + 16); styleAdd(W, 'cust');
+          remember(W, s, 'tempcut', `${CUST[k]} 이탈 방지 한시 인하`, { cust: k });
+          lever(G, `${CUST[k]} 넉 달 한시 인하`, { rel: [[k, 16]],
+            risk: `${dateLabel(t.until)}에 원복 — 그때 관계가 안 돌아와 있으면 또 온다` });
+          return `넉 달만 깎아주는 조건으로 잡았습니다. 기한은 계약서에 박았습니다. `
+               + `${dateLabel(t.until)}이면 원래 단가로 돌아갑니다. 그 안에 관계를 돌려놔야 합니다.`; } },
+      /* 값을 계약에 반영하고 싶으면 정기 협상 자리에서 해야 한다. 여기서는 약속만 한다. */
+      { label: '다음 단가 협상에서 계약 단가를 열어주겠다고 약속한다', hint: '값은 협상 날에 치른다',
+        fx: [`+${CUST[k]} 관계 회복`, `−다음 ${cname(k)} 정기 협상에서 최소 $5/t 요구를 받게 됨`,
+             '?그때 약속을 깨면 관계가 무너진다'],
+        apply: (s, G) => { W.pledge = W.pledge || {}; W.pledge[k] = Math.max(W.pledge[k] || 0, 5);
+          W.rel[k] = wClamp(W.rel[k] + 12); styleAdd(W, 'cust');
+          remember(W, s, 'pledge', `${CUST[k]}에 다음 협상 단가 인하 약속`, { cust: k });
+          lever(G, `${CUST[k]} 다음 협상 단가 약속`, { rel: [[k, 12]], risk: '다음 정기 협상에서 $5/t 청구서' });
+          return `다음 협상에서 열어드리겠다고 했습니다. 일단 잡았습니다. 대신 그쪽 구매팀장이 수첩에 적더군요. `
+               + `협상 날 그 수첩을 펴놓고 앉아 있을 겁니다.`; } },
       { label: '놓아주고 다른 고객에 집중한다', hint: '정리할 건 정리한다', fx: [`−${CUST[k]} 물량 크게 감소`, '+다른 고객에 영업력 집중'],
         apply: (s, G) => { const v = growCust(s, k, -0.45); W.stats.dropped++; styleAdd(W, 'cash');
           const other = Object.keys(CUST).filter(x => x !== k).sort((a, b) => W.rel[b] - W.rel[a])[0];
-          G.ui.custFocus = other;
+          /* 놓아준 고객에 붙어 있던 영업 자원은 그 자리에서 다음 고객으로 넘긴다.
+             반기 계획을 기다리지 않는다 — 이미 놓기로 한 고객에 사람을 붙여둘 이유가 없다. */
+          const mix = s.salesMix || (s.salesMix = {});
+          const moved = Math.round(mix[k] || 0);
+          if (moved > 0) { mix[other] = (mix[other] || 0) + moved; mix[k] = 0; }
+          delete (W.pledge || {})[k];
           remember(W, s, 'drop', `${CUST[k]} 정리`, { cust: k });
-          lever(G, `${CUST[k]} 정리, ${CUST[other]} 집중`, { vol: v });
-          return `${CUST[k]}는 놨습니다. 영업 인력은 전부 ${CUST[other]}에 붙였습니다. 매달리는 영업은 오래 못 갑니다.`; } },
+          lever(G, `${CUST[k]} 정리, ${CUST[other]} 집중`, { vol: v,
+            risk: moved > 0 ? `영업 자원 ${moved}점을 ${CUST[other]}로 옮겼습니다` : null });
+          return `${CUST[k]}는 놨습니다. ${moved > 0 ? `거기 붙어 있던 영업 자원 ${moved}점은 전부 ${CUST[other]}로 돌렸습니다. ` : ''}`
+               + `매달리는 영업은 오래 못 갑니다.`; } },
     ],
   };
 }
@@ -4347,6 +4430,8 @@ const $ = s => document.querySelector(s);
 const app = $('#app');
 const fmt = n => Math.round(n).toLocaleString('en-US');
 const money = n => (n < 0 ? '−$' : '$') + fmt(Math.abs(n));
+// $17,610 → "18k". 천 단위가 안 되면 그냥 달러로 적는다.
+const money1k = n => Math.abs(n) >= 1000 ? fmt(Math.round(n / 1000)) + 'k' : Math.round(n).toLocaleString();
 const M = n => (n < 0 ? '−$' : '$') + (Math.abs(n) / 1e6).toFixed(1) + 'M';
 
 /* ============================================================
@@ -5783,8 +5868,13 @@ function custPanel(s) {
   return `<div class="card">
     <h2>고객군별 월평균 판매량</h2>
     ${Object.entries(CFG.CUSTOMERS).map(([k, c]) => {
-      const r = G && G.W ? G.W.rel[k] : 60, cut = G && G.W ? G.W.cut[k] : 0;
-      // 깎아준 단가 × 그 고객 월 판매량 = 매달 사라지는 이익
+      const W = G && G.W;
+      const r = W ? W.rel[k] : 60;
+      const con = W ? (W.cut[k] || 0) : 0;                       // 계약 단가 — 다음 협상까지
+      const tmp = W && W.temp && W.temp[k] && W.temp[k].until > s.turn ? W.temp[k] : null;  // 한시 인하
+      const pdg = W && W.pledge ? (W.pledge[k] || 0) : 0;        // 다음 협상에서 내주기로 한 것
+      const cut = W ? cutNow(s, W, k) : 0;          // 본사 승인 한도($12/t)까지 잘린 실제 양보액
+      // 지금 나가고 있는 양보액 × 그 고객 월 판매량 = 매달 사라지는 이익
       const leak = cut * (avg[k] || 0);
       const pts = Math.round(mix[k] || 0);
       return `<div class="custbar ${pts > 0 ? '' : 'off'}"><span>${CUST[k]} · ${c.name}</span>
@@ -5792,14 +5882,20 @@ function custPanel(s) {
         <span>월 ${fmt(Math.round(avg[k] || 0))}t</span>
         <span class="rel ${relCls(r)}">${relLabel(r)}</span>
         <span class="eff">영업 ${pts}${pts > 0 ? '' : ' · 무관리'}</span>
-        <span class="leak">${cut > 0
-          ? `단가 −$${cut}/t → 월 −$${leak >= 1000 ? fmt(Math.round(leak / 1000)) + 'k' : Math.round(leak).toLocaleString()}`
-          : cut < 0 ? `단가 +$${-cut}/t → 월 +$${fmt(Math.round(-leak / 1000))}k` : '단가 그대로'}</span>
+        <span class="leak">${cut !== 0
+          // 곱셈을 그대로 보여준다. "월 −$18k"만 있으면 어디서 나온 숫자인지 알 수가 없다.
+          ? `<b>${cut > 0 ? '−' : '+'}$${Math.abs(cut)}</b>/t × ${fmt(Math.round(avg[k] || 0))}t
+             = 월 이익 <b>${cut > 0 ? '−' : '+'}$${money1k(Math.abs(leak))}</b>`
+             + (tmp ? `<i class="tmp">한시 $${tmp.amt} 포함 · ${dateLabel(tmp.until).replace(/^\d+년 /, '')} 원복</i>` : '')
+             + (pdg ? `<i class="pdg">다음 협상 −$${pdg} 약속</i>` : '')
+          : pdg ? `단가 양보 없음<i class="pdg">다음 협상 −$${pdg} 약속</i>` : '단가 양보 없음'}</span>
       </div>`;
     }).join('')}
     <p class="hint">「영업」은 반기 영업 계획에서 나눠 준 100점입니다. 0점인 고객군은 매달 조금씩 물량이 빠집니다.${
       pend ? ` 새 배분은 ${dateLabel(pend.turn).replace(/^\d+년 /, '')}부터 숫자에 나타납니다.` : ''}<br>
-      깎아준 단가는 계약이 살아 있는 한 매달 나갑니다 — 되돌리려면 단가 협상에서 인상을 관철해야 합니다.</p>
+      단가 양보는 <b>계약 단가</b>(정기 협상에서만 바뀌고 다음 협상까지 간다)와
+      <b>한시 인하</b>(기한이 되면 자동으로 원복된다) 둘로 나뉩니다.
+      영구히 마진을 깎는 계약은 하지 않습니다 — 계약 단가를 되돌리려면 정기 협상에서 인상을 관철해야 합니다.</p>
   </div>`;
 }
 
