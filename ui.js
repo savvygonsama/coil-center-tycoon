@@ -184,9 +184,11 @@ function dealTurn() {
     if (pool.length) put(wPick(pool));
   }
 
-  // 4. 너무 조용하면 기회를 올린다
-  if (G.queue.length < (G.mpt > 1 ? 4 : 2)) put(custFocusCard(s, W));
-  if (G.queue.length < (G.mpt > 1 ? 3 : 1)) put(policyCard(s, W, coverOf(s)));
+  /* 4. 너무 조용하면 기회를 올린다.
+     여기에 "영업 방침"이나 "구매 방침"을 채워 넣으면 안 된다 — 그건 이미 정한 것을
+     또 묻는 것이고, 조용한 달마다 같은 카드가 돌아오는 원인이었다.
+     빈 자리는 판을 흔드는 한 장으로 채운다. */
+  if (G.queue.length < (G.mpt > 1 ? 4 : 2)) put(quietCard(s, W, look(s)));
 
   /* 5. 소재 발주는 매달 마지막에 올린다. 이 회사에서 사장이 매달 반드시 하는 유일한 일이다.
      다른 안건을 다 보고 나서 — 고장이 났는지, 고객이 물량을 더 준다는지 알고 나서 — 숫자를 적어야 하니까. */
@@ -241,11 +243,12 @@ function openDecisions() {
   dlg.className = 'deck';
 
   const head = `<div class="deckhead">
-    <span>${periodNow()} · ${DECK_LABEL[deck] || '결재'}</span>
+    <span>${periodNow()} · ${deckLabel(deck)}</span>
     <span class="step">${G.qi + 1} / ${G.queue.length}</span></div>`;
 
   const ask = () => {
     if (card.form === 'order') return askOrder();
+    if (card.form === 'sales') return askSales();
     dlg.innerHTML = `<div class="dlg">${head}
       <div class="crew">${crewBlock(who)}
         <div class="crew-body"><div class="line says">${card.text}</div></div></div>
@@ -261,6 +264,9 @@ function openDecisions() {
      한 줄에 그 고객군의 월 사용량 · 창고 · 해상 · 본사 생산 중 · 재고율 · 재원율이 다 있다.
      사장이 보고 톤수를 적는다. 합계와 합계 재원율이 아래에서 실시간으로 바뀐다. */
   const askOrder = () => {
+    /* 발주는 언제나 결재의 맨 마지막이다. 앞에서 고른 카드들이 권장량을 이미 바꿨으니
+       여기서 다시 계산해야 화면의 권장량과 실제로 나갈 양이 일치한다. */
+    card.rows = orderRows(G.s, look(G.s));
     const rows = card.rows;
     const vals = {};
     for (const r of rows) vals[r.k] = r.rec;
@@ -330,12 +336,92 @@ function openDecisions() {
   };
 
   const submitOrder = (vals) => {
+    const tot = fmt(Math.round(Object.values(vals).reduce((a, b) => a + b, 0)));
+    submitForm(vals, `${tot}톤 발주`, `${tot}톤`);
+  };
+
+  /* 반기 영업 자원 배분 — 100점을 고객군에 나눈다.
+     한 줄에 그 고객군의 최근 월평균 판매량·관계·성장 성향이 있다.
+     0을 준 줄은 화면에서 바로 회색으로 죽는다. 손을 놓는다는 게 눈에 보여야 한다. */
+  const askSales = () => {
+    const rows = card.rows;
+    const vals = {};
+    for (const r of rows) vals[r.k] = r.cur;
+    const GROWLAB = g => g >= 1.8 ? '급성장' : g >= 1.05 ? '성장' : g >= 0.9 ? '보합' : '정체';
+
+    const paint = () => {
+      const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
+      const box = dlg.querySelector('#ssum');
+      if (box) box.innerHTML = `<b>합계 ${tot}점</b>`
+        + `<span class="${tot === 100 ? 'up' : 'dn'}">${tot === 100 ? '딱 100' : `100으로 환산해서 배분합니다`}</span>`;
+      rows.forEach(r => {
+        const tr = dlg.querySelector(`tr[data-sk="${r.k}"]`);
+        if (tr) tr.className = (vals[r.k] || 0) > 0 ? '' : 'off';
+      });
+    };
+
+    dlg.innerHTML = `<div class="dlg">${head}
+      <div class="crew">${crewBlock(who)}
+        <div class="crew-body"><div class="line says">${card.text}</div></div></div>
+      <div class="deckq"><h2>${card.title}</h2></div>
+      <div class="ordwrap">
+        <table class="ordt">
+          <tr><th>고객군</th><th>최근 월평균<br>판매량</th><th>관계</th><th>물량 전망</th>
+              <th>지금</th><th>이번 반기 배분</th></tr>
+          ${rows.map(r => `<tr data-sk="${r.k}" class="${r.cur > 0 ? '' : 'off'}">
+            <td class="oname">${CUST[r.k]} <i>${CFG.CUSTOMERS[r.k].name}</i></td>
+            <td>${fmt(Math.round(r.avg))}t</td>
+            <td class="${relCls(r.rel)}">${relLabel(r.rel)}</td>
+            <td>${GROWLAB(r.grow)}</td>
+            <td>${r.cur}</td>
+            <td><input type="number" min="0" max="100" step="5" data-sk="${r.k}" value="${r.cur}"></td>
+            </tr>`).join('')}
+        </table>
+        <div class="ordbar">
+          <div id="ssum" class="osum"></div>
+          <div class="obtns">
+            <button class="mini" data-sset="keep">지금 그대로</button>
+            <button class="mini" data-sset="even">고르게</button>
+            <button class="mini" data-sset="share">판매량 비례</button>
+          </div>
+        </div>
+        <p class="hint">0을 준 고객군은 관리가 끊깁니다 — 매달 조금씩 물량이 빠집니다.
+          자원을 받은 고객군은 조금씩 늘어나되, 원래 잘 크는 곳이 더 빨리 큽니다.<br>
+          바꾼 배분은 <b>${CFG.SALES_EFFORT_LAG}개월 뒤</b>부터 숫자에 나타납니다. 다음 배분은 반년 뒤입니다.</p>
+        <button class="primary" id="ssubmit">이 배분으로 반기를 간다</button>
+      </div>
+    </div>`;
+
+    dlg.querySelectorAll('input[data-sk]').forEach(inp => inp.oninput = () => {
+      vals[inp.dataset.sk] = Math.min(100, Math.max(0, Math.round(+inp.value || 0))); paint();
+    });
+    dlg.querySelectorAll('[data-sset]').forEach(b => b.onclick = () => {
+      const m = b.dataset.sset;
+      const totA = rows.reduce((a, r) => a + r.avg, 0) || 1;
+      rows.forEach(r => {
+        vals[r.k] = m === 'keep' ? r.cur
+                  : m === 'even' ? Math.round(100 / rows.length)
+                  : Math.round(r.avg / totA * 100);
+      });
+      dlg.querySelectorAll('input[data-sk]').forEach(i => i.value = vals[i.dataset.sk]);
+      paint();
+    });
+    dlg.querySelector('#ssubmit').onclick = () => {
+      const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
+      if (tot <= 0) { dlg.querySelector('#ssum').innerHTML = '<b class="dn">한 군데에는 붙여야 합니다.</b>'; return; }
+      const shown = rows.filter(r => vals[r.k] > 0).map(r => `${CUST[r.k]} ${Math.round(vals[r.k] / tot * 100)}`).join(' · ');
+      submitForm(vals, `영업 자원 ${shown}`, shown);
+    };
+    paint();
+  };
+
+  const submitForm = (vals, verdictLabel, doneLabel) => {
     const before = snap(G.s);
     const msg = card.submit(vals, G.s, G) || '';
     const chips = deltaChips(before, snap(G.s));
-    G.done.push({ deck, title: card.title, choice: `${fmt(Math.round(Object.values(vals).reduce((a, b) => a + b, 0)))}톤`, msg });
+    G.done.push({ deck, title: card.title, choice: doneLabel, msg });
     if (msg) G.resultLines = (G.resultLines || []).concat(msg);
-    showVerdict(`${fmt(Math.round(Object.values(vals).reduce((a, b) => a + b, 0)))}톤 발주`, msg, chips);
+    showVerdict(verdictLabel, msg, chips);
   };
 
   const choose = (i) => {
@@ -351,7 +437,7 @@ function openDecisions() {
 
     showVerdict(o.label, msg, chips,
       o.mult && o.mult !== 1 ? `<div class="chips"><span class="chip ${o.mult >= 1 ? 'up' : 'down'}">
-        이번 달 소재 발주 ×${o.mult}</span></div>` : '');
+        소재 발주 권장량 ×${o.mult} — 마지막 발주 표에 반영됩니다</span></div>` : '');
   };
 
   const showVerdict = (choiceLabel, msg, chips, extra = '') => {
@@ -391,27 +477,76 @@ function cardCtx(s) {
   return { load, tight: load > 0.97, idle: load < 0.55, pmTrend };
 }
 
-const DECK_LABEL = { mat: '자재', hr: '인사', ga: '총무', buy: '소재 발주', policy: '소재 발주 · 방침', cust: '영업 · 고객', price: '영업 · 가격', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', solar: '설비 투자', order: '소재 발주', op: '운영', life: '사내', big: '주요 사건' };
+const DECK_LABEL = { mat: '자재', hr: '인사', ga: '총무', buy: '소재 발주', cust: '영업 · 반기 계획', price: '영업 · 단가 협상', spot: '영업 · 유통 스팟', vol: '영업 · 수주', sales: '영업', prod: '생산', people: '조직', quality: '품질', cash: '재무', credit: '재무', hq: '본사', legacy: '정상화', solar: '설비 투자', order: '소재 발주', op: '운영', life: '사내', big: '주요 사건' };
+/* 단가 협상은 고객군마다 다른 주제(price-JP …)라 접미사를 떼고 찾는다.
+   같은 달에 여러 고객과 협상할 수 있어야 해서 주제를 나눠 놓은 결과다. */
+function deckLabel(deck) {
+  return DECK_LABEL[deck] || DECK_LABEL[String(deck).split('-')[0]] || '결재';
+}
 
-/* 매달 영업 인력을 어느 고객군에 붙일지. 결실은 석 달 뒤. */
-function customerCard(s) {
+/* ============================================================
+   영업 자원 배분 — 반기에 딱 한 번.
+
+   영업 인력·출장비·접대비·기술지원을 합쳐 100점이라고 치고, 고객군에 나눠 준다.
+   한 점도 안 준 고객군은 서서히 빠지고, 조금이라도 준 곳은 조금이라도 는다.
+   이건 매달 물어볼 성질의 것이 아니다. 반기 영업 계획은 반기에 한 번 세운다.
+   ============================================================ */
+function salesPlanRows(s) {
+  const mix = s.salesMix || {};
+  const avg = custAvgTons(s);
+  return Object.keys(CFG.CUSTOMERS).map(k => ({
+    k, cur: Math.round(mix[k] || 0), avg: avg[k] || 0,
+    rel: G && G.W ? G.W.rel[k] : 60,
+    grow: CFG.CUSTOMERS[k].grow,
+  }));
+}
+
+/* 최근 판매 실적으로 본 고객군별 월평균 판매량(제품 톤).
+   비중(%)보다 이게 낫다 — 전체가 줄면 비중은 그대로인데 톤수는 빠지기 때문이다. */
+function custAvgTons(s) {
+  const hist = (s.history || []).slice(-3);
+  const out = {};
+  if (!hist.length) {
+    const L = look(s);
+    for (const k in CFG.CUSTOMERS) out[k] = L.need * (s.custShare[k] || 0);
+    return out;
+  }
+  for (const r of hist) {
+    const c = custTonsOf(r);
+    for (const k in CFG.CUSTOMERS) out[k] = (out[k] || 0) + (c[k] || 0) / hist.length;
+  }
+  return out;
+}
+
+function salesPlanCard(s, W) {
   const when = dateLabel(s.turn + CFG.SALES_EFFORT_LAG);
+  const rows = salesPlanRows(s);
+  const first = !s.history || !s.history.length;
   return {
-    id: 'cust', who: 'jung', topic: 'cust',
-    title: '어느 고객군에 붙을까요',
-    text: `영업 인력이 몇 명이나 된다고요. 한 군데 골라서 제대로 붙는 게 낫습니다. `
-        + `대신 손 놓은 쪽은 조금씩 빠져나갑니다. 그건 각오하셔야 해요. `
-        + `결과는 ${when}쯤 나옵니다. 그때까지는 아무 일도 안 일어납니다.`,
-    opts: Object.entries(CFG.CUSTOMERS).map(([k, c]) => ({
-      label: `${c.emoji} ${c.name}`,
-      hint: `지금 우리 거래의 ${((s.custShare[k] || 0) * 100).toFixed(0)}%`,
-      fx: [`+${c.good}`, `−${c.bad_}`],
-      apply: (st, g) => {
-        g.ui.custFocus = k;
-        return `${c.name} 쪽에 붙었습니다. ${when}쯤부터 거래 비중이 올라옵니다. `
-             + `대신 다른 고객군은 그동안 조금씩 빠집니다.`;
-      },
-    })),
+    id: 'sales-plan', who: 'jung', topic: 'cust', form: 'sales', rows,
+    title: '이번 반기 영업 자원을 어떻게 나눌까요',
+    text: `사장님, 반기 영업 계획입니다. 영업 인력에 출장비, 기술지원까지 다 합쳐서 `
+        + `100이라고 칩시다. 이걸 고객군에 나눠 주시면 그대로 뜁니다. `
+        + `${first ? '전임 사장님이 쓰던 배분을 그대로 적어뒀습니다. ' : '지금 배분을 적어뒀습니다. '}`
+        + `분명히 말씀드립니다 — 0을 주신 데는 관리가 안 됩니다. 당장 끊기지는 않는데 매달 조금씩 빠집니다. `
+        + `그리고 오늘 바꾸셔도 숫자로 보이는 건 ${when}부텁니다. 영업은 그날 가서 그날 되는 게 아닙니다.`,
+    submit: (vals, st, g) => {
+      const tot = Object.values(vals).reduce((a, b) => a + b, 0) || 1;
+      const mix = {};
+      for (const k in CFG.CUSTOMERS) mix[k] = Math.round((vals[k] || 0) / tot * 100);
+      g.ui.salesMix = mix;
+      const on = Object.keys(CFG.CUSTOMERS).filter(k => mix[k] > 0);
+      const off = Object.keys(CFG.CUSTOMERS).filter(k => !mix[k]);
+      remember(W, st, 'salesplan', `영업 자원 배분 ${on.map(k => `${CUST[k]} ${mix[k]}`).join(' · ')}`);
+      lever(g, '반기 영업 자원 배분', {
+        risk: off.length ? `${off.map(k => CUST[k]).join('·')}는 무관리 — 매달 물량이 조금씩 빠집니다` : null,
+      });
+      const top = on.sort((a, b) => mix[b] - mix[a])[0];
+      return `${on.map(k => `${CFG.CUSTOMERS[k].name} ${mix[k]}`).join(', ')}으로 짰습니다. `
+           + `${top ? `${CFG.CUSTOMERS[top].name}에 제일 세게 붙입니다. ` : ''}`
+           + `${off.length ? `${off.map(k => CFG.CUSTOMERS[k].name).join('·')}는 사실상 손 놓는 겁니다. 나중에 딴말 없기입니다. ` : '다섯 군데 다 챙기는 건 다섯 군데 다 대충 하는 거랑 비슷합니다만, 사장님 뜻대로 하겠습니다. '}`
+           + `숫자는 ${when}부터 움직입니다.`;
+    },
   };
 }
 
@@ -462,7 +597,12 @@ function orderRows(s, L) {
        권장량이 천장을 넘지 않게 잘라둔다. 분기 결재에서 한 번 넘치면
        다음 분기 권장이 0이 되고 그다음에 또 몰리는 톱니가 생긴다. */
     const ceiling = useM * (lead + cover + mo);
-    const rec = Math.min(MAX, Math.max(0, ceiling - res), Math.max(0, use + useM * aim - res));
+    /* 이번 결재에서 고른 카드가 "재고를 늘려둔다 / 발주를 줄인다"를 골랐으면
+       그건 권장량에 반영한다. 사장이 적어낸 숫자에 몰래 곱하면 안 된다 —
+       5,000톤이라고 적었는데 8,500톤이 나가면 그건 결재가 아니다. */
+    const cardMult = (G && G.mult) || 1;
+    const rec = Math.min(MAX, Math.max(0, ceiling - res),
+      Math.max(0, use + useM * aim - res) * cardMult);
     return { k, sh, use, oh, sea: se, prod: pr, inv, res, max: Math.round(MAX / 50) * 50,
       invM: useM > 0 ? inv / useM : 0, resM: useM > 0 ? res / useM : 0,
       rec: Math.round(rec / 50) * 50 };
@@ -473,12 +613,20 @@ function orderCard(s, W, L) {
   const rows = orderRows(s, L);
   const sn = stockNow(s);
   const mo = orderMonths();
+  /* 소재값 소문은 결재 안건이 아니라 정보다. 따로 카드로 물으면 같은 결정을 두 번 시키는 셈이라,
+     여기 발주 표 위에 한 줄로 붙여두고 톤수는 사장이 정하게 한다. */
+  const rumor = W.priceRumor === 1
+      ? '아, 그리고 — 본사 영업팀 제 동기 얘긴데 다음 분기에 소재값 올린답니다. 확정은 아닙니다만, 그러면 지금 많이 걸어두는 게 남는 겁니다. '
+    : W.priceRumor === -1
+      ? '아, 그리고 — 본사 재고가 꽤 쌓였답니다. 다음 분기에 값이 빠질 수도 있습니다. 반은 소문입니다만, 맞으면 지금 적게 거는 게 낫습니다. '
+      : '';
   return {
     id: 'op-order', who: 'jung', topic: 'order', form: 'order', rows, months: mo,
     title: mo > 1 ? '이번 분기 소재 발주를 정해주십시오' : '이번 달 소재 발주를 정해주십시오',
     text: `사장님, ${mo > 1 ? '이번 분기' : '이번 달'} 발주입니다. `
         + `지금 전체로 보면 재고율 ${sn.invM.toFixed(1)}개월, 재원율 ${sn.resM.toFixed(1)}개월이고요. `
         + `${mo > 1 ? `분기 결재니까 석 달치를 한 번에 겁니다. 적어주신 톤수를 세 달에 나눠서 집행합니다. ` : ''}`
+        + `${rumor}`
         + `고객군별로 쓰는 속도가 다릅니다. 한 줄씩 보고 정하시죠. `
         + `제가 계산한 권장량을 넣어뒀는데, 이건 내시가 그대로 간다는 전제입니다. `
         + `걸면 ${CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd}개월 뒤에 들어옵니다. 그때 가서 바꾸자는 건 안 됩니다.`,
@@ -543,7 +691,10 @@ function buildDecision(s, ui) {
   const raw = G ? (G.mult || 1) : 1;
   const mo = G ? (G.mpt || 1) : 1;
   const mult = 1 + (raw - 1) / mo;
-  const buy = ui.orderTon != null ? ui.orderTon * mult : auto * raw;
+  /* 사장이 발주 표에 적은 숫자가 있으면 그게 전부다. 카드 배수는 발주 표의
+     권장량(orderRows)에 이미 반영돼 있으니 여기서 또 곱하면 두 번 먹는다.
+     적어낸 숫자가 없을 때(프렐류드, 속성 모드의 2·3번째 달)만 자동 계산에 배수를 건다. */
+  const buy = ui.orderTon != null ? ui.orderTon : auto * mult;
   const n = L.now, hasCommon = (s.hqSpotCredit || 0) > 1;
   /* 가공 제품은 열흘치쯤 들고 있어야 한다. 고객 라인은 JIT로 도는데 우리 라인이 매일 그 순서대로
      돌 수는 없다. 그래서 이번 달 내시에 목표 제품재고와의 차이를 더해서 돌린다. */
@@ -561,7 +712,7 @@ function buildDecision(s, ui) {
     options: { overtime: ui.overtime, // 깎아준 단가는 그 고객 비중만큼 매달 판가에 남는다
                discount: G ? (G.turnDiscount || 0) + (G.W ? standingCut(s, G.W) : 0) : 0,
                trimYield: G && G.trim ? G.trim.options[G.trimPick].yield : 0,
-               custFocus: ui.custFocus || null },
+               custFocus: null, salesMix: ui.salesMix || null },
     run: { SLIT: runS, LEVEL: runL, TRAP: runT, DIE: runD },
     // 출하는 이번 달 수요만큼. 제품 창고에서 먼저 나가고, 남는 건 다음 달 안전재고가 된다.
     sell: { C2C: n.C2C || 0, SLIT: 1e9, LEVEL: 1e9, TRAP: 1e9, DIE: 1e9 },
@@ -1279,28 +1430,36 @@ function takeoverBrief(s) {
    그 숫자를 보고 사장이 할 수 있는 일이 없었다. 포트폴리오 가중평균은
    엔진이 알아서 쓰면 되는 값이지 화면에 띄울 값이 아니다.
    대신 깎아준 단가는 "얼마 깎였나"가 아니라 "그래서 한 달에 얼마가 새나"로 보여준다. */
+/* 고객 현황.
+   비중(%)이 아니라 월평균 판매량(톤)으로 본다 — 전체가 줄면 비중은 그대로인데
+   톤수는 빠지기 때문이다. 비중만 보면 회사가 쪼그라드는 걸 못 본다.
+   여기에 지금 영업 자원을 몇 점 붙여놨는지, 그 고객에 톤당 얼마를 깎아줬는지를 같이 둔다.
+   그래야 반기 영업 계획과 단가 협상을 같은 화면에서 판단할 수 있다. */
 function custPanel(s) {
-  const sh = s.custShare || {};
-  const L = look(s);
+  const avg = custAvgTons(s);
+  const mix = s.salesMix || {};
+  const pend = (s.custQueue || []).find(q => q.mix);
+  const max = Math.max(1, ...Object.values(avg));
   return `<div class="card">
-    <h2>우리 고객 구성</h2>
+    <h2>고객군별 월평균 판매량</h2>
     ${Object.entries(CFG.CUSTOMERS).map(([k, c]) => {
-      const pend = (s.custQueue || []).filter(q => q.key === k);
       const r = G && G.W ? G.W.rel[k] : 60, cut = G && G.W ? G.W.cut[k] : 0;
       // 깎아준 단가 × 그 고객 월 판매량 = 매달 사라지는 이익
-      const leak = cut * L.need * (sh[k] || 0);
-      return `<div class="custbar"><span>${CUST[k]} · ${c.name}</span>
-        <span class="track"><span class="fill" style="width:${(sh[k] || 0) * 100}%"></span></span>
-        <span>${((sh[k] || 0) * 100).toFixed(0)}%${pend.length
-          ? `<span class="pend">▲${dateLabel(pend[0].turn).replace(/^\d+년 /, '')}</span>` : ''}</span>
+      const leak = cut * (avg[k] || 0);
+      const pts = Math.round(mix[k] || 0);
+      return `<div class="custbar ${pts > 0 ? '' : 'off'}"><span>${CUST[k]} · ${c.name}</span>
+        <span class="track"><span class="fill" style="width:${(avg[k] || 0) / max * 100}%"></span></span>
+        <span>월 ${fmt(Math.round(avg[k] || 0))}t</span>
         <span class="rel ${relCls(r)}">${relLabel(r)}</span>
+        <span class="eff">영업 ${pts}${pts > 0 ? '' : ' · 무관리'}</span>
         <span class="leak">${cut > 0
-          ? `깎아준 단가로 월 −$${leak >= 1000 ? fmt(Math.round(leak / 1000)) + 'k' : Math.round(leak).toLocaleString()}`
-          : '단가 그대로'}</span>
+          ? `단가 −$${cut}/t → 월 −$${leak >= 1000 ? fmt(Math.round(leak / 1000)) + 'k' : Math.round(leak).toLocaleString()}`
+          : cut < 0 ? `단가 +$${-cut}/t → 월 +$${fmt(Math.round(-leak / 1000))}k` : '단가 그대로'}</span>
       </div>`;
     }).join('')}
-    <p class="hint">관계가 나빠지면 주문이 줄고, 바닥까지 가면 경쟁사로 넘어갑니다.
-      깎아준 단가는 계약이 살아 있는 한 매달 나갑니다 — 매년 1월 재협상에서 절반만 되돌릴 수 있습니다.</p>
+    <p class="hint">「영업」은 반기 영업 계획에서 나눠 준 100점입니다. 0점인 고객군은 매달 조금씩 물량이 빠집니다.${
+      pend ? ` 새 배분은 ${dateLabel(pend.turn).replace(/^\d+년 /, '')}부터 숫자에 나타납니다.` : ''}<br>
+      깎아준 단가는 계약이 살아 있는 한 매달 나갑니다 — 되돌리려면 단가 협상에서 인상을 관철해야 합니다.</p>
   </div>`;
 }
 
@@ -1321,7 +1480,7 @@ function decisionsMade() {
   if (!G.done || !G.done.length) return '';
   return `<div class="card">
     <h2>지난 결재</h2>
-    <table>${G.done.map(d => `<tr><td><span class="tag">${DECK_LABEL[d.deck] || '결재'}</span> ${d.title}</td>
+    <table>${G.done.map(d => `<tr><td><span class="tag">${deckLabel(d.deck)}</span> ${d.title}</td>
       <td><b>${d.choice}</b></td></tr>`).join('')}</table>
   </div>`;
 }
@@ -1400,7 +1559,7 @@ function advance() {
        사장이 적어낸 숫자가 곧 그 분기에 나가는 전부다.
        나머지 두 달은 0으로 둔다. 자동으로 더 나가면 그건 결재가 아니다. */
     const ui = i === 0 ? G.ui
-             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, orderTon: 0 };
+             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, salesMix: null, orderTon: 0 };
     worldPre(s, G.W);                       // 설비·품질이 이번 달 캐파와 수율을 정한다
     const res = resolveTurn(s, buildDecision(s, ui));
     worldPost(res.state, G.W, res.report, G); // 결과가 설비·관계·피로를 움직이고, 다음 사건을 부른다
@@ -1422,7 +1581,7 @@ function advance() {
 
   G.resultLines = [];
   G.turnDiscount = 0;
-  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null, orderTon: null, orderBy: null });
+  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null, salesMix: null, orderTon: null, orderBy: null });
   showReport(mergeReports(reports));
 }
 

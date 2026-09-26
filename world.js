@@ -55,7 +55,8 @@ function initWorld(s, diff) {
     relHigh: { JP: 0, EU: 0, CN: 0, PART: 0, HOME: 0 },
     threat: {},                   // 이번 달 경쟁사가 실제로 들어간 고객 (숨김)
     comp: 35,                     // 경쟁사 공격성 (숨김)
-    deferMaint: 1, maintAge: 7,
+    deferMaint: 1, maintAge: 7, maintCool: 0,   // 이 턴이 지나야 정비 안건을 다시 올릴 수 있다
+    negoTurn: {},                 // 고객별 마지막 단가 협상 턴
     priceDir: 0, priceRumor: null, // 본사 가격 방향 (숨김) 과 그에 대한 소문
     policy: 'normal',
     hq: { target: 0, ytd: 0, commit: null, log: [] },
@@ -64,7 +65,7 @@ function initWorld(s, diff) {
     breakdown: null, claim: null, capHit: 1, qBoost: 0,
     stats: { breakdowns: 0, claims: 0, shortages: 0, concessions: 0, deferrals: 0, maint: 0,
              overloadMonths: 0, utilSum: 0, months: 0, churn: 0, hqHit: 0, hqMiss: 0,
-             cashTight: 0, qualSum: 0, projects: 0, dropped: 0 },
+             cashTight: 0, qualSum: 0, projects: 0, dropped: 0, spot: 0 },
     style: { grow: 0, cash: 0, cust: 0, craft: 0, hq: 0 },
   };
   for (const k in CUST) W.shareHist[k] = [];

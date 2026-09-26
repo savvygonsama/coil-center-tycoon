@@ -507,15 +507,23 @@
   .k-est{background:var(--ochre-l);color:#8a6410}
   .k-rum{background:var(--rust-l);color:var(--rust)}
 
-  .custbar{grid-template-columns:150px 1fr 48px 84px 168px}
+  .custbar{grid-template-columns:150px 1fr 72px 84px 92px 158px}
   .custbar .rel{font-size:12px;padding:1px 6px;border:1.5px solid var(--ink);text-align:center;
     white-space:nowrap;font-weight:800}
+  .custbar .eff{font-size:12px;font-weight:800;white-space:nowrap;text-align:center;
+    padding:1px 6px;border:1.5px solid var(--ink);background:var(--blue-l);color:var(--blue)}
+  .custbar.off .eff{background:var(--panel2);color:var(--dim);border-style:dashed}
+  .custbar.off .fill{opacity:.45}
   .custbar .leak{font-size:12.5px;color:var(--dim);white-space:nowrap;font-weight:700;
     font-variant-numeric:tabular-nums}
   .rel.up{background:var(--teal-l);color:var(--teal)} .rel.neu{background:var(--panel2);color:var(--dim)}
   .rel.dn{background:var(--rust-l);color:var(--rust)}
-  @media(max-width:760px){ .custbar{grid-template-columns:120px 1fr 40px 72px;font-size:13px}
+  @media(max-width:760px){ .custbar{grid-template-columns:120px 1fr 62px 72px 84px;font-size:13px}
     .custbar .leak{grid-column:1 / -1;text-align:right;margin-top:-4px} }
+
+  /* 영업 자원 배분 표 — 0점을 준 줄은 눈에 보이게 죽인다 */
+  .ordt tr.off td{opacity:.5;background:var(--panel2)}
+  .ordt tr.off td.oname::after{content:' · 무관리';font-size:10.5px;color:var(--rust);font-weight:800}
 
   .profile{max-width:620px;margin:16px auto 0;text-align:left}
   .profile p{font-size:16.5px;line-height:1.75;margin:0 0 10px}

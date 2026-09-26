@@ -35,7 +35,10 @@ function worldIssues(s, W, G) {
   const limitUse = s.debt.limit > 0 ? s.debt.principal / s.debt.limit : 0;
   if (limitUse > 0.80 && s.turn > 2 && since('w-limit') > 5) add(limitCard(s, W, limitUse), 92);
   if ((cov > COVER.heavy || inventoryTons(s) > CFG.WAREHOUSE_CAP_BASE * 0.85) && since('w-over') > 3) add(overCard(s, W, cov), 72);
-  if ((W.equip < 60 || W.maintAge >= 9) && since('w-maint') > 2)
+  /* 정비 — 한 번 결정하면 그 결정이 유효한 기간이 있다.
+     전면 정비를 했는데 다음 달에 또 "정비한 지 오래됐습니다" 하고 오면 그건 버그다.
+     그래서 결정할 때마다 다음에 다시 물을 수 있는 달(W.maintCool)을 박아둔다. */
+  if (s.turn >= (W.maintCool || 0) && (W.equip < 55 || W.maintAge >= 10))
     add(maintCard(s, W), 50 + Math.max(0, 60 - W.equip) * 2 + W.deferMaint * 8);
   if (hot >= 2 && W.fatigue > 22 && since('w-load') > 4) add(overloadCard(s, W, hot), 76);
   if ((W.quality < 70 || qualDrop(W) > 0.25) && since('w-qual') > 3) add(qualityCard(s, W), 50 + Math.max(0, 70 - W.quality) * 2);
@@ -45,14 +48,25 @@ function worldIssues(s, W, G) {
   if (!W.solar && s.turn > 5 && since('m-solar') > 9) add(solarCard(s, W), 66);
 
   /* ---------- 고객 ---------- */
+  /* 단가는 아무 때나 깎아달라고 오는 게 아니다. 계약서에 협상 주기가 박혀 있다.
+     자동차·부품은 반기에 한 번, 가전·강건재는 분기에 한 번. 그 달이 아니면 협상 자리가 없다.
+     대신 그 자리는 인하만 하는 자리가 아니다 — 시황이 받쳐주면 우리가 올려 달라고 한다. */
   for (const k of shares) {
-    // 한 번 깎아준 고객은 다시 온다. 경쟁사가 붙은 고객도 온다.
-    const pressure = W.concede[k] > 0 && since('w-price-' + k) >= 4
-      || (W.comp > 45 && W.rel[k] < 62 && since('w-price-' + k) > 4);
-    if (pressure && wChance(0.3 + W.concede[k] * 0.12)) add(priceCard(s, W, k), 58 + W.concede[k] * 10);
     if (W.rel[k] < 42 && since('w-churn-' + k) > 4) add(churnCard(s, W, k), 80);
     if (W.relHigh[k] >= 3 && since('w-proj') > 10) add(projectCard(s, W, k, L), 78);
   }
+  /* 협상 자리는 거래가 작아도 열린다. 계약이 살아 있으면 단가는 다시 쓴다.
+     영업 자원을 붙여 놓은 고객군은 지금 작아도 키우려는 곳이니 반드시 포함한다 —
+     여기를 큰 고객으로만 좁히면 작은 고객군은 단가를 영영 못 고친다. */
+  const negoKs = Object.keys(CUST).filter(k =>
+    (s.custShare[k] || 0) > 0.03 || ((s.salesMix || {})[k] || 0) > 0);
+  for (const k of negoKs)
+    // 재입장 금지 기간은 그 고객의 협상 주기보다 짧아야 한다. 분기 고객에 넉 달을 걸면
+    // 분기 협상이 반기 협상으로 둔갑한다.
+    if (negoDue(k, month, G.mpt || 1) && since('w-nego-' + k) >= (NEGO_CYCLE[k] === '분기' ? 3 : 5))
+      add(negoCard(s, W, k, L), 74, true);
+  /* 유통향 스팟 — 눌러보기 전에는 결과를 모른다. 이 게임에서 유일하게 즉시 판가름 나는 판이다. */
+  if (s.turn > 3 && since('m-spot') > 5 && wChance(0.38)) add(spotBetCard(s, W, L), 56);
   const volK = shares.filter(k => W.rel[k] >= 60).sort(() => Math.random() - 0.5)[0];
   if (volK && s.market.phase !== 'BUST' && s.turn > 4 && since('w-vol') > 3 && (W.utilHist.slice(-1)[0] ?? 0) < 0.95 && wChance(0.5))
     add(volumeCard(s, W, volK, L), 46);
@@ -65,9 +79,12 @@ function worldIssues(s, W, G) {
   if (ex && !(s.buildQueue || []).length && since('op-expand') > 6) add(expandCard(ex, L, s), 45);
   if (u3.length === 3 && u3.every(u => u < 0.55) && since('w-idle') > 4) add(idleCard(s, W), 52);
 
-  /* ---------- 구매 방침과 소문 ---------- */
-  if (W.priceRumor && W.priceRumor !== 0 && s.turn % 3 === 1 && since('w-rumor') > 2) add(rumorCard(s, W), 50);
-  if (s.turn === 2 || since('w-policy') >= 8) add(policyCard(s, W, cov), 38);
+  /* ---------- 구매 방침은 안건이 아니다 ----------
+     사장은 매 결재마다 고객군별 발주 톤수를 직접 적는다. 그게 구매 방침이다.
+     그래 놓고 다른 직원이 들어와 "재고를 얼마나 들고 갈까요"를 다시 물으면,
+     같은 결정을 두 번 시키는 것이고 둘이 어긋나면 앞뒤가 안 맞는다.
+     본사 가격 소문은 결정이 아니라 정보다 — 브리핑(world.js)과 발주 화면에만 띄우고,
+     그걸 보고 톤수를 얼마로 적을지는 사장이 발주 표에서 정한다. */
 
   /* ---------- 자재 — 서 대리 ---------- */
   if (s.turn > 2 && since('m-pack') > 12 && wChance(0.12)) add(packCard(s, W), 44);
@@ -89,8 +106,13 @@ function worldIssues(s, W, G) {
   if ((W.mem.some(m => m.tag === 'quit' && s.turn - m.turn <= 2) || (s.morale < 50 && wChance(0.15)))
       && since('h-hire') > 10) add(vacancyCard(s, W), 60);
 
+  /* ---------- 반기 영업 계획 ----------
+     "어디에 힘을 쏟을까요"를 매달 물으면 그건 계획이 아니라 잡담이다.
+     반기에 한 번, 영업 자원 100점을 고객군에 나누는 자리로 못 박는다. */
+  const planDue = s.turn === 1 || (G.mpt > 1 ? month === 0 || month === 6 : month === 0 || month === 6);
+  if (planDue && since('sales-plan') >= 4) add(salesPlanCard(s, W), 88, true);
+
   /* ---------- 조용할 때 ---------- */
-  if ((s.turn - (G.lastCust ?? -99)) >= (G.mpt > 1 ? 2 : 5)) add(custFocusCard(s, W), 34);
   if (s.turn > 8 && since('w-credit') > 9 && wChance(0.25)) add(creditCard(s, W), 30);
 
   return list;
@@ -122,7 +144,7 @@ function breakdownCard(s, W) {
     const c2 = W.spares ? Math.min(0.95, cap * 1.12) : W.spares === false ? cap * 0.88 : cap;
     const cost2 = W.insLow ? Math.round(cost * 1.5) : cost;
     W.capHit *= c2; s.cash -= cost2; W.equip = wClamp(W.equip + eq); cost = cost2;
-    W.breakdown = null; W.stats.breakdowns++;
+    W.breakdown = null; W.maintCool = Math.max(W.maintCool || 0, s.turn + 3); W.stats.breakdowns++;
     for (const k of Object.keys(CUST).sort((a, b) => (s.custShare[b] || 0) - (s.custShare[a] || 0)).slice(0, 2))
       W.rel[k] = wClamp(W.rel[k] - (cap < 0.75 ? 6 : 3));
     remember(W, s, 'breakdown', `${lineNo} 라인 고장`);
@@ -389,61 +411,292 @@ function overCard(s, W, cov) {
   };
 }
 
-function rumorCard(s, W) {
-  const up = W.priceRumor === 1;
-  const act = (m, tag, label, msg, style) => (s, G) => {
-    G.mult *= m; styleAdd(W, style); remember(W, s, tag, label);
-    lever(G, label, { order: m, risk: m > 1 ? (up ? '안 오르면 재고만 남음' : '더 내리면 평가손') : '반대로 가면 비싸게 산다' });
-    return msg;
-  };
+/* ============================================================
+   단가 협상 — 계약서에 박힌 주기에만 열린다.
+
+   전에는 경쟁사 소문이 돌 때마다 "깎아달랍니다"가 아무 달에나 튀어나왔다.
+   실무는 그렇지 않다. 자동차·부품사는 반기에 한 번, 가전·강건재는 분기에 한 번
+   단가를 다시 쓴다. 그 자리가 아니면 단가는 그냥 그대로 간다.
+
+   그리고 그 자리는 깎이러 가는 자리가 아니다. 시황과 경쟁 구도에 따라
+   우리가 올려 달라고 하는 자리이기도 하다. 정 부장이 들고 오는 정보 —
+   경쟁사가 실제로 견적을 넣었는지, 그 고객이 크는 중인지 쪼그라드는 중인지,
+   소재 시세가 어디로 가는지 — 가 그대로 선택지의 결과를 정한다.
+   정보를 읽으면 맞히고, 안 읽으면 틀린다. 그게 이 카드의 전부다.
+   ============================================================ */
+const NEGO_SLOT = { HOME: [0, 3, 6, 9], EU: [1, 7], CN: [2, 8], JP: [4, 10], PART: [5, 11] };
+const NEGO_CYCLE = { HOME: '분기', EU: '반기', CN: '반기', JP: '반기', PART: '반기' };
+
+/* 이번 결재가 덮는 기간(노멀 1개월, 속성 3개월) 안에 그 고객의 협상 달이 들어 있는가 */
+function negoDue(k, month, mpt) {
+  const slots = NEGO_SLOT[k] || [];
+  for (let i = 0; i < mpt; i++) if (slots.includes((month + i) % 12)) return true;
+  return false;
+}
+
+/* 협상 테이블에 올라오는 정보. 전부 실제 상태에서 뽑는다 — 분위기용 문장이 아니다. */
+function negoIntel(s, W, k) {
+  const c = CFG.CUSTOMERS[k];
+  const h = s.history || [];
+  const pmTrend = h.length >= 3 ? h[h.length - 1].pm - h[h.length - 3].pm : 0;
+  const util = W.utilHist.slice(-1)[0] ?? 0.8;
+  const sh = s.custShare[k] || 0;
+  const hist = (W.shareHist[k] || []).slice(-6);
+  const trend = hist.length >= 4 ? hist[hist.length - 1] / Math.max(1e-6, hist[0]) - 1 : 0;
   return {
-    id: 'w-rumor', who: 'jung', topic: 'buy',
-    title: up ? '본사가 소재값을 올린다는 소문이 있습니다' : '소재값이 내릴 거라는 얘기가 있습니다',
-    text: up
-      ? '사장님, 이거 빨리 결정하셔야 합니다. 본사 영업팀에 제 입사 동기가 있는데, 다음 분기에 소재값 올린답니다. '
-        + '확정은 아닙니다. 그 친구가 작년에 한 번 틀리긴 했습니다. 그래도 저는 이번엔 맞다고 봅니다.'
-      : '사장님, 본사 재고가 꽤 쌓였답니다. 다음 분기에 값이 내려갈 수도 있다는데 — 솔직히 반은 소문입니다. '
-        + '그래도 맞으면 톤당 몇십 달러짜리 얘기라 그냥 넘기기가 아깝습니다.',
-    opts: up ? [
-      { label: '오르기 전에 넉넉히 산다', hint: '소문에 건다', fx: ['+맞으면 싸게 산 셈', '−발주 ×1.5 · 현금 묶임', '?소문이 틀리면 재고만 남음'],
-        apply: act(1.5, 'overbuy', '인상 소문에 선매입', '넉넉하게 걸었습니다. 제 촉이 맞을 겁니다. 아마도요.', 'grow') },
-      { label: '평소대로', hint: '소문은 소문', fx: ['=발주 그대로'], apply: act(1, 'normal-buy', '평소대로 발주', '평소대로 갑니다. 소문은 소문이죠.', null) },
-      { label: '오히려 줄이고 지켜본다', hint: '확인되면 움직인다', fx: ['+현금 여유', '−발주 ×0.7', '?오르면 비싸게 산다'],
-        apply: act(0.7, 'underbuy', '인상 소문에도 발주 축소', '줄였습니다. 확인되면 그때 크게 가겠습니다.', 'cash') },
-    ] : [
-      { label: '내릴 때까지 발주를 줄인다', hint: '소문에 건다', fx: ['+맞으면 싸게 산다', '−발주 ×0.6', '?소문이 틀리면 결품'],
-        apply: act(0.6, 'underbuy', '하락 소문에 발주 축소', '줄였습니다. 값 내리면 그때 왕창 잡는 겁니다.', 'cash') },
-      { label: '평소대로', hint: '소문은 소문', fx: ['=발주 그대로'], apply: act(1, 'normal-buy', '평소대로 발주', '평소대로 갑니다. 소문은 소문이죠.', null) },
-      { label: '그래도 물량은 확보한다', hint: '결품이 더 무섭다', fx: ['+결품 걱정 없음', '−발주 ×1.2', '?내리면 평가손'],
-        apply: act(1.2, 'overbuy', '하락 소문에도 물량 확보', '물량부터 잡았습니다. 값이야 나중 일이고, 결품은 그날로 끝입니다.', 'cust') },
-    ],
+    threat: !!W.threat[k],                       // 경쟁사가 진짜로 견적을 넣었나
+    comp: W.comp,                                // 경쟁 강도
+    tight: s.market.phase === 'BOOM',            // 물건이 귀한 국면
+    slack: s.market.phase === 'BUST',            // 물건이 남는 국면
+    pmUp: pmTrend > 6, pmDown: pmTrend < -6,
+    outlook: c.grow >= 1.8 ? 'up' : c.grow >= 1.0 ? 'flat' : 'down',
+    trend,                                        // 최근 우리 물량 추세
+    dep: sh > 0.40, sh, util,
+    full: util > 0.92,
+    cut: W.cut[k] || 0, rel: W.rel[k], quality: W.quality,
   };
 }
 
-function policyCard(s, W, cov) {
-  const set = (p, tag, label, msg, style) => (s, G) => {
-    W.policy = p; styleAdd(W, style); remember(W, s, tag, label);
-    lever(G, label, { risk: p === 'tight' ? '현금 ↑ · 결품 위험 ↑' : p === 'ample' ? '결품 위험 ↓ · 현금 묶임' : '표준' });
+function negoCard(s, W, k, L) {
+  const c = CFG.CUSTOMERS[k], I = negoIntel(s, W, k);
+  const cycle = NEGO_CYCLE[k];
+
+  /* 고객이 부르는 값 — 시황·경쟁·의존도가 정한다. 가공마진이 톤당 $40인 장사라
+     여기서 $6을 내주면 그 고객 마진의 15%가 한 번에 날아간다. */
+  const ask = Math.max(0, Math.min(7,
+    2 + (I.slack ? 2 : 0) + (I.threat ? 2 : 0) + (I.comp > 50 ? 1 : 0) + (I.dep ? 1 : 0) - (I.tight ? 2 : 0)));
+  /* 우리가 올려 부를 수 있는 값 */
+  const up = Math.max(2, Math.min(6, 2 + (I.tight ? 2 : 0) + (I.pmUp ? 1 : 0) + (I.cut >= 6 ? 1 : 0)));
+
+  /* 단가를 내줬을 때 실제로 따라오는 물량. 여기가 이 카드의 핵심이다 —
+     크는 고객에게 내주면 물량이 오고, 쪼그라드는 고객에게 내주면 그냥 마진만 준 것이다. */
+  const give = I.outlook === 'up' ? 0.26 : I.outlook === 'flat' ? 0.13 : 0.03;
+
+  /* 인상 성공 확률 — 시황이 받쳐주고 품질·관계가 쌓여 있어야 통한다 */
+  const upP = Math.max(0.05, Math.min(0.88,
+    0.30 + (I.tight ? 0.30 : 0) + (I.pmUp ? 0.12 : 0) + (I.quality >= 74 ? 0.14 : 0)
+    + (I.rel >= 65 ? 0.14 : 0) + (I.outlook === 'up' ? 0.08 : 0)
+    - (I.threat ? 0.30 : 0) - (I.slack ? 0.25 : 0) - (I.comp > 55 ? 0.10 : 0)));
+
+  /* 정 부장이 들고 온 정보. 하나하나가 위 숫자의 근거다. */
+  const intel = [
+    I.threat
+      ? `먼저 확인된 것부터 말씀드립니다. 경쟁사가 진짜로 견적을 넣었습니다. 사본을 봤습니다.`
+      : I.comp > 50
+        ? `싸게 준다는 데가 있다고 흘리는데, 제가 보기엔 떠보는 겁니다. 확신은 못 합니다만.`
+        : `이번엔 경쟁사 움직임은 조용합니다.`,
+    I.outlook === 'up'
+      ? `그리고 이게 중요한데 — ${c.name} 쪽은 지금 라인을 늘리는 중입니다. 여기서 단가를 열어주면 물량이 확실히 따라옵니다.`
+      : I.outlook === 'down'
+        ? `다만 솔직하게 말씀드리면, ${c.name}은 물량 자체가 안 늘어납니다. 여기서 깎아줘 봐야 깎인 단가만 남습니다.`
+        : `${c.name} 물량은 늘지도 줄지도 않는 흐름입니다.`,
+    I.tight ? `시황은 우리 편입니다. 지금 물건이 귀합니다.`
+      : I.slack ? `시황이 나쁩니다. 어디든 물건이 남아돕니다. 그쪽도 그걸 압니다.`
+      : I.pmUp ? `소재 시세가 석 달째 오릅니다. 인상 얘기를 꺼낼 거면 지금이 창입니다.` : '',
+    I.full ? `한 가지만 더 — 지금 라인이 ${Math.round(I.util * 100)}%입니다. 물량을 더 받아와도 만들 데가 없습니다.` : '',
+    I.dep ? `우리 물량의 ${Math.round(I.sh * 100)}%가 거깁니다. 그쪽도 그걸 알고 부르는 값입니다.` : '',
+    I.cut > 0 ? `참고로 지금까지 이 고객에 톤당 $${I.cut} 내줬습니다. 그건 계약이 사는 한 매달 나갑니다.` : '',
+  ].filter(Boolean).join(' ');
+
+  const close = (label, tag, msg, fxObj) => (st, G) => {
+    W.negoTurn = W.negoTurn || {}; W.negoTurn[k] = st.turn;
+    remember(W, st, tag, label, { cust: k });
+    lever(G, label, fxObj);
     return msg;
   };
-  const cur = { tight: '타이트', normal: '표준', ample: '넉넉' }[W.policy];
+
+  const opts = [];
+
+  /* 1) 내주고 물량을 받는다 — 크는 고객에게만 맞는 수 */
+  if (ask > 0) opts.push({
+    label: `톤당 $${ask} 내주고 물량 확대를 문서로 받는다`,
+    hint: I.outlook === 'up' ? '크는 고객이다 — 물량이 따라온다'
+        : I.outlook === 'down' ? '쪼그라드는 고객이다 — 물량이 안 온다' : '물량은 조금 는다',
+    fx: [`−${CUST[k]} 단가 −$${ask}/t (계속)`, `+물량 ${I.outlook === 'up' ? '크게 ↑' : I.outlook === 'down' ? '거의 그대로' : '↑'}`,
+         I.full ? '?라인이 꽉 차 있어 다 못 만든다' : `+${CUST[k]} 관계 ↑`],
+    apply: (st, G) => {
+      W.cut[k] += ask; W.concede[k]++; W.stats.concessions++;
+      const v = growCust(st, k, give); W.rel[k] = wClamp(W.rel[k] + 6);
+      styleAdd(W, 'grow'); styleAdd(W, 'cust');
+      return close(`${CUST[k]} 단가 −$${ask} · 물량 확대`, 'concede',
+        I.outlook === 'down'
+          ? `사인했습니다. 단가는 내줬는데… 솔직히 물량은 안 늘 겁니다. 제가 말씀은 드렸습니다.`
+          : I.full
+            ? `사인했습니다. 물량은 받아왔는데 구 공장장이 뭐라 할 겁니다. 라인이 꽉 찼거든요.`
+            : `사인했습니다. 단가를 열어준 만큼 물량을 문서로 박았습니다. 이런 건 문서로 안 박으면 다음 분기에 없던 일이 됩니다.`,
+        { cut: [k, ask], vol: v, rel: [[k, 6]], risk: I.outlook === 'down' ? '물량 없이 단가만 내준 셈' : null })(st, G);
+    },
+  });
+
+  /* 2) 동결 — 경쟁사 견적이 진짜면 값을 치른다 */
+  opts.push({
+    label: '현행 단가 동결로 버틴다',
+    hint: I.threat ? '경쟁사 견적이 진짜다 — 위험하다' : '경쟁사 얘기는 떠보는 것 같다',
+    fx: ['+단가 지킴', I.threat ? `?${CUST[k]} 물량 이탈 위험 큼` : `?${CUST[k]} 서운함`],
+    apply: (st, G) => {
+      styleAdd(W, 'cash');
+      if (I.threat) {
+        const v = growCust(st, k, -0.22); W.rel[k] = wClamp(W.rel[k] - 8);
+        return close(`${CUST[k]} 동결 — 물량 이탈`, 'hold',
+          `동결로 갔습니다. 견적서는 진짜였고 물량 5분의 1이 넘어갔습니다. 제가 확인해 드렸는데도 가신 거니 제 탓은 아닙니다만, 기분은 좋지 않습니다.`,
+          { vol: v, rel: [[k, -8]] })(st, G);
+      }
+      W.rel[k] = wClamp(W.rel[k] - 2);
+      return close(`${CUST[k]} 동결 — 버팀`, 'hold-ok',
+        `동결했습니다. 역시 떠보는 거였습니다. 마진 그대로 갑니다.`, { rel: [[k, -2]] })(st, G);
+    },
+  });
+
+  /* 3) 인상 요구 — 이 게임에서 마진을 되돌릴 수 있는 유일한 자리 */
+  opts.push({
+    label: `톤당 $${up} 인상을 요구한다`,
+    hint: `통할 확률 대략 ${Math.round(upP * 100)}% — ${I.tight ? '시황이 받쳐준다' : I.slack ? '시황이 안 받쳐준다' : '반반이다'}`,
+    fx: [`+통하면 ${CUST[k]} 단가 +$${up}/t`, '?실패하면 관계 악화 · 물량 일부 이탈'],
+    apply: (st, G) => {
+      styleAdd(W, 'cash');
+      if (wChance(upP)) {
+        W.cut[k] = Math.max(-8, (W.cut[k] || 0) - up); W.rel[k] = wClamp(W.rel[k] - 3);
+        return close(`${CUST[k]} 단가 +$${up} 관철`, 'raise',
+          `받아냈습니다. ${I.tight ? '물건이 귀하니까 됐습니다. 이런 창은 오래 안 열립니다.' : '품질 자료 들고 세 번 갔습니다.'} `
+          + `톤당 $${up} 올렸습니다. 이게 그대로 이익입니다.`,
+          { cut: [k, -up], rel: [[k, -3]] })(st, G);
+      }
+      const v = growCust(st, k, -0.12); W.rel[k] = wClamp(W.rel[k] - 10);
+      return close(`${CUST[k]} 인상 실패`, 'raise-fail',
+        `안 됐습니다. ${I.threat ? '경쟁사 견적을 책상에 꺼내 놓더군요.' : I.slack ? '지금 같은 시황에 올려달라는 게 어디 있냐고 하더군요.' : '표정이 굳었습니다.'} `
+        + `물량도 조금 빠졌습니다. 제가 판을 잘못 읽었습니다.`,
+        { vol: v, rel: [[k, -10]], risk: '관계 회복까지 몇 달' })(st, G);
+    },
+  });
+
+  /* 4) 품질·납기로 동결을 설득 — 평소에 쌓아둔 게 있어야 나오는 선택지 */
+  if (I.quality >= 68) opts.push({
+    label: '품질·납기 실적을 들고 동결을 설득한다',
+    hint: `우리 품질 ${qualityPct(W.quality)}점 · 관계 ${relLabel(W.rel[k])}`,
+    fx: ['+통하면 단가 유지 · 관계 ↑', '?못 받쳐주면 물량 일부 이탈'],
+    apply: (st, G) => {
+      const ok = W.quality >= 72 && W.rel[k] >= 55 && wChance(0.75);
+      if (ok) {
+        W.rel[k] = wClamp(W.rel[k] + 3); styleAdd(W, 'craft');
+        return close(`${CUST[k]} 품질로 동결 설득 — 성공`, 'persuade',
+          `불량률하고 납기 준수율 자료를 한 장씩 짚었습니다. 동결로 마무리했습니다. 이런 건 그날 만드는 게 아니라 평소에 쌓아두는 겁니다.`,
+          { rel: [[k, 3]] })(st, G);
+      }
+      const v = growCust(st, k, -0.10); W.rel[k] = wClamp(W.rel[k] - 5);
+      return close(`${CUST[k]} 품질로 동결 설득 — 실패`, 'hold',
+        `${W.quality < 72 ? '우리 불량률이 오히려 역공 자료가 됐습니다. 얼굴이 화끈했습니다.' : '거기까지 관계가 못 받쳐줬습니다.'} 물량 일부 빠졌습니다.`,
+        { vol: v, rel: [[k, -5]] })(st, G);
+    },
+  });
+
   return {
-    id: 'w-policy', who: 'jung', topic: 'policy',
-    title: '재고를 얼마나 들고 갈지 정해주세요',
-    text: `사장님, 소재 발주 방침 한 번 정해두시죠. 매달 물어보기도 뭣하고요. `
-        + `지금은 「${cur}」, 재고율 ${cov.toFixed(1)}개월에 재원율 ${stockNow(s).resM.toFixed(1)}개월입니다. `
-        + `제 입장은 분명합니다 — 결품이 제일 무섭습니다. 배가 늦는 달도 있고 내시가 갑자기 뛰는 달도 있고요. `
-        + `한 부장님은 재고에 돈 묶인다고 반대하십니다. 그 말도 틀린 건 아닙니다.`,
+    id: 'w-nego-' + k, who: 'jung', topic: 'price-' + k,
+    title: `${cname(k)} ${cycle} 단가 협상입니다`,
+    text: `사장님, ${c.name} ${cycle} 단가 협상 날입니다. 계약서상 이번 달에 다시 씁니다. `
+        + `${ask > 0 ? `그쪽은 톤당 $${ask} 내려 달라고 나왔습니다. ` : `이번엔 그쪽이 인하 얘기를 못 꺼냈습니다. `}`
+        + `${intel} 어떻게 갈지 정해주십시오. 다음 자리는 ${cycle === '분기' ? '석 달' : '여섯 달'} 뒤입니다.`,
+    opts,
+  };
+}
+
+/* ============================================================
+   유통향 스팟 — 이 게임에서 유일하게 즉시 판가름 나는 판.
+
+   본사나 유통상이 일반재를 싸게 넘기겠다고 한다. 받아서 다 팔면 이익이고
+   본사 신뢰도 오른다. 못 팔면 그대로 창고에서 늙어 반값에 나간다.
+   확률은 시황이 정한다. 눌러보기 전에는 결과를 모르고, 누르면 그 자리에서 안다.
+   ============================================================ */
+function spotBetCard(s, W, L) {
+  const pm = s.market.pm;
+  const disc = wPick([0.06, 0.08, 0.11]);
+  const buy = pm * (1 - disc);
+  /* 한 달 소요량의 4분의 1쯤, 그리고 매입액 $1.0M을 넘지 않게 자른다.
+     이보다 크게 걸면 한 번의 도박이 4년치 영업이익을 넘어버리고,
+     그때부터는 경영 시뮬레이션이 아니라 슬롯머신이 된다. */
+  const qty = Math.max(300,
+    Math.round(Math.min(L.need * wPick([0.12, 0.18, 0.25]), 1_000_000 / buy) / 100) * 100);
+  const gainPerTon = Math.round(pm * disc);                 // 다 팔았을 때 톤당 남는 돈 (싸게 산 만큼)
+  const phase = s.market.phase;
+  const pFull = ({ BOOM: 0.60, NORMAL: 0.40, BUST: 0.20 })[phase] ?? 0.40;
+  const cov = coverOf(s);
+  const pAdj = Math.min(0.80, pFull + (COVER.heavy - cov > 0.6 ? 0.08 : 0) - (cov > COVER.heavy ? 0.10 : 0));
+  const mood = phase === 'BOOM' ? '지금은 물건 없어서 못 파는 장입니다. 이럴 때 잡아야죠.'
+    : phase === 'BUST' ? '솔직히 지금 장에서 이걸 다 팔 자신은 없습니다. 반은 남는다고 보셔야 합니다.'
+    : '반반입니다. 잘 풀리면 한 달 이익이 통째로 붙고, 안 풀리면 창고에 눕습니다.';
+
+  /* 눌렀을 때 그 자리에서 굴린다. 팔린 만큼은 현금, 안 팔린 만큼은 장기재고. */
+  const roll = (take, st, G) => {
+    const t = Math.round(qty * take);
+    const r = Math.random();
+    const f = r < pAdj ? 1 : r < pAdj + 0.34 ? 0.55 : 0.2;
+    const sold = Math.round(t * f), left = t - sold;
+    st.cash += sold * gainPerTon;
+    if (left > 0) {
+      // 안 팔린 물건은 대금을 치르고 야드에 눕는다. 여기서부터는 매달 늙는다.
+      st.cash -= left * buy;
+      st.invRaw.push({ qty: left, unitCost: buy, arrivalTurn: st.turn, dt: 'SPOT', gr: 'COMMON' });
+    }
+    const tr = f >= 1 ? 3 : f >= 0.5 ? 1 : -1;
+    st.trust = Math.max(0, Math.min(100, st.trust + tr));
+    W.stats.spot = (W.stats.spot || 0) + 1;
+    remember(W, st, f >= 1 ? 'spot-win' : 'spot-lose', `유통 스팟 ${fmt(t)}톤 중 ${fmt(sold)}톤 소화`);
+    lever(G, `유통향 스팟 ${fmt(t)}톤`, {
+      cash: Math.round(sold * gainPerTon - left * buy), trust: tr,
+      risk: left > 0 ? `${fmt(left)}톤이 장기재고로 남았습니다 — 넉 달 뒤 반값` : null,
+    });
+    if (f >= 1)
+      return `전부 털었습니다! ${fmt(sold)}톤, 톤당 $${gainPerTon} 남겼습니다. 현금 $${fmt(Math.round(sold * gainPerTon / 1000))}k 들어왔고 본사도 좋아합니다. `
+           + `이런 날도 있어야 이 장사 하죠.`;
+    if (f >= 0.5)
+      return `${fmt(sold)}톤은 털었는데 ${fmt(left)}톤이 남았습니다. 남은 건 야드에 눕혔습니다. `
+           + `넉 달 안에 안 나가면 반값입니다. 제가 더 뛰어보겠습니다만, 장담은 못 하겠습니다.`;
+    return `${fmt(sold)}톤밖에 못 팔았습니다. ${fmt(left)}톤이 그대로 남았습니다. `
+         + `제가 판을 잘못 읽었습니다. 저 물건 넉 달 뒤면 반값에 나갑니다. 죄송합니다.`;
+  };
+
+  const mk = (take, label, hint) => ({
+    label, hint,
+    fx: take === 0 ? ['+아무 일도 안 일어난다', '−본사가 조금 서운해한다']
+      : [`+다 팔면 톤당 +$${gainPerTon} · 본사 신뢰 ↑`,
+         `?못 판 만큼 야드에 쌓입니다 — 넉 달 안에 못 털면 톤당 −$${Math.round(buy * (1 - CFG.DUMP_PRICE_RATE))}`,
+         `?완판 확률 ${Math.round(pAdj * 100)}%`],
+    apply: (st, G) => {
+      if (take === 0) {
+        st.trust = Math.max(0, st.trust - 1);
+        remember(W, st, 'spot-pass', '유통 스팟 거절');
+        lever(G, '유통향 스팟 거절', { trust: -1 });
+        return '안 받았습니다. 본사 쪽에서 "그래요…" 하고 전화를 끊더군요. 뭐, 창고에 안 눕는 게 어딥니까.';
+      }
+      return roll(take, st, G);
+    },
+  });
+
+  return {
+    id: 'm-spot', who: 'jung', topic: 'spot',
+    title: `유통향 일반재 ${fmt(qty)}톤을 싸게 넘기겠답니다`,
+    text: `사장님, 이건 지금 자리에서 답 주셔야 합니다. 유통향 일반재 ${fmt(qty)}톤을 시세보다 `
+        + `${Math.round(disc * 100)}% 싸게 넘기겠답니다. 다 팔면 톤당 $${gainPerTon} 남습니다. `
+        + `대신 이건 받는 사람이 정해진 물건이 아닙니다 — 우리가 알아서 팔아야 합니다. `
+        + `${mood} 결과는 이 자리에서 바로 나옵니다.`,
     opts: [
-      { label: '넉넉하게', hint: '결품이 제일 무섭다', fx: ['+결품 위험 ↓', '−현금이 창고에 묶임', '?값이 내리면 손실'],
-        apply: set('ample', 'policy-ample', '재고 방침 넉넉', '넉넉하게 갑니다. 정 부장 얼굴이 펴졌고, 한 부장은 숫자만 들여다봤습니다.', 'cust') },
-      { label: '표준', hint: '리드타임만큼', fx: ['=표준'], apply: set('normal', 'policy-normal', '재고 방침 표준', '표준으로 갑니다. 둘 다 반쯤 불만인 걸 보니 적당한 모양입니다.', null) },
-      { label: '타이트하게', hint: '현금이 제일 중요하다', fx: ['+현금 여유', '−결품 위험 ↑', '?배가 늦으면 라인이 선다'],
-        apply: set('tight', 'policy-tight', '재고 방침 타이트', '타이트하게 갑니다. 한 부장이 그제야 고개를 끄덕였습니다.', 'cash') },
+      mk(1, `전량 ${fmt(qty)}톤을 받는다`, '크게 건다'),
+      mk(0.5, `절반 ${fmt(Math.round(qty * 0.5))}톤만 받는다`, '반만 건다'),
+      mk(0, '받지 않는다', '창고에 안 눕히는 것도 실력'),
     ],
   };
 }
 
+/* 조용한 달에 올릴 한 장. 같은 게 계속 오지 않도록 후보를 돌려가며 고른다. */
+function quietCard(s, W, L) {
+  const pool = [];
+  if (s.turn > 3) pool.push(() => spotBetCard(s, W, L));
+  if (s.turn > 8) pool.push(() => creditCard(s, W));
+  if (s.turn > 5 && !W.solar) pool.push(() => solarCard(s, W));
+  if (s.turn > 3) pool.push(() => safetyCard(s, W));
+  if (s.turn > 2) pool.push(() => packCard(s, W));
+  if (!pool.length) return null;
+  return wPick(pool)();
+}
 /* ============================================================
    현금 — 지난 결정들의 합계가 여기서 청구된다
    ============================================================ */
@@ -529,36 +782,46 @@ function limitCard(s, W, use) {
 /* ============================================================
    생산 — 돌리면 닳고, 세우면 매출이 빈다
    ============================================================ */
+/* 정비. 한 번 결정하면 그 결정에 유효기간이 있다.
+   전면 정비를 하고 나면 여섯 달은 구 공장장이 안 온다. 미루면 두 달 뒤에 다시 온다.
+   그 유효기간을 W.maintCool(다시 물어봐도 되는 턴)에 박아둔다.
+   이게 없으면 "정비한 지 10개월"이라고 해서 돈 들여 정비했는데
+   다음 달에 또 "정비한 지 10개월"이라고 오는 일이 생긴다. */
 function maintCard(s, W) {
   const why = W.deferMaint >= 1 ? `지난번에도 미뤘다 아입니꺼. 이번이 ${W.deferMaint + 1}번쨉니더.` : '';
   const hot = W.utilHist.slice(-4).filter(u => u > 0.9).length;
+  const worn = W.equip < 55 && W.maintAge < 6;
   return {
     id: 'w-maint', who: 'gu', topic: 'prod',
-    title: '라인을 세우고 정비해야 합니다',
-    text: `사장님예, 마지막 정비가 ${W.maintAge}개월 전입니더. ${hot >= 2 ? `그 사이에 ${hot}달을 90% 넘게 돌렸고예. ` : ''}${why} `
+    title: worn ? '정비한 지는 얼마 안 됐는데 상태가 나쁩니다' : '라인을 세우고 정비해야 합니다',
+    text: worn
+      ? `사장님예, 정비는 ${W.maintAge}개월 전에 했심더. 근데 그 뒤로 ${hot >= 2 ? `${hot}달을 90% 넘게 돌리가` : '쉬지 않고 돌리가'} `
+        + `상태가 벌써 ${equipLabel(W.equip)}까지 내려왔습니더. 정비 주기 문제가 아이고 돌리는 강도 문제입니더. `
+        + `우짤지 정해주이소.`
+      : `사장님예, 마지막 정비가 ${W.maintAge}개월 전입니더. ${hot >= 2 ? `그 사이에 ${hot}달을 90% 넘게 돌렸고예. ` : ''}${why} `
         + `세우면 이번 달 물량이 빕니더. 근데 안 세우면 언제 설지는 저도 모릅니더. `
         + `기계가 말을 안 하이까네, 설 때 돼야 압니더.`,
     opts: [
-      { label: '전면 정비 — 일주일 세운다', hint: '장기 생산성',
+      { label: '전면 정비 — 일주일 세운다', hint: '여섯 달은 이 얘기 안 나온다',
         fx: ['−통장 $26,000', '−이번 달 캐파 12% 손실', '+설비 크게 회복', '+품질 개선'],
         apply: (s, G) => { s.cash -= 26_000; W.capHit *= 0.88; W.equip = wClamp(W.equip + 32); W.qBoost += 5;
-          W.deferMaint = 0; W.maintAge = 0; W.stats.maint++; styleAdd(W, 'craft', 2);
+          W.deferMaint = 0; W.maintAge = 0; W.maintCool = s.turn + 6; W.stats.maint++; styleAdd(W, 'craft', 2);
           remember(W, s, 'maint', '전면 정비');
-          lever(G, '전면 정비', { cash: -40_000, equip: 32, quality: 1, risk: '이번 달 매출 감소' });
-          return '일주일 세아놓고 전부 뜯었심더. 구 공장장이 기름 묻은 손으로 "인자 됐습니더" 한마디 했습니다.'; } },
-      { label: '주말에 부분 정비', hint: '급한 것만',
+          lever(G, '전면 정비', { cash: -26_000, equip: 32, quality: 1, risk: '이번 달 매출 감소' });
+          return '일주일 세아놓고 전부 뜯었심더. 기름 묻은 손으로 "인자 됐습니더" 한마디 하고 나가데예. 당분간은 이 얘기 안 할 겁니더.'; } },
+      { label: '주말에 부분 정비', hint: '급한 것만 — 석 달 뒤 다시 본다',
         fx: ['−통장 $25,000', '=캐파 손실 거의 없음', '+설비 조금 회복'],
-        apply: (s, G) => { s.cash -= 25_000; W.equip = wClamp(W.equip + 12); W.maintAge = Math.max(0, W.maintAge - 4);
-          W.fatigue = wClamp(W.fatigue + 4); styleAdd(W, 'craft');
+        apply: (s, G) => { s.cash -= 25_000; W.equip = wClamp(W.equip + 12); W.maintAge = Math.max(0, W.maintAge - 6);
+          W.maintCool = s.turn + 3; W.fatigue = wClamp(W.fatigue + 4); styleAdd(W, 'craft');
           remember(W, s, 'maint-part', '부분 정비');
-          lever(G, '주말 부분 정비', { cash: -25_000, equip: 12 });
-          return '주말에 특근 걸어가 급한 것만 손봤심더. 근본은 안 고쳤습니다.'; } },
-      { label: '다음 달로 미룬다', hint: '지금은 물량이 먼저',
+          lever(G, '주말 부분 정비', { cash: -25_000, equip: 12, risk: '근본은 안 고쳤다 — 석 달 뒤 다시' });
+          return '주말에 특근 걸어가 급한 것만 손봤심더. 근본은 안 고쳤습니다. 석 달쯤 뒤에 다시 말씀드리겠심더.'; } },
+      { label: '미룬다', hint: '지금은 물량이 먼저 — 두 달 뒤 다시 온다',
         fx: ['+이번 달 캐파 그대로', '?고장 위험 누적', '?품질 저하'],
-        apply: (s, G) => { W.deferMaint++; W.stats.deferrals++; styleAdd(W, 'grow');
+        apply: (s, G) => { W.deferMaint++; W.maintCool = s.turn + 2; W.stats.deferrals++; styleAdd(W, 'grow');
           remember(W, s, 'defer', '정비 연기');
           lever(G, '정비 연기', { risk: '고장 확률 상승' });
-          return '미뤘습니다. 구 공장장이 아무 말 없이 모자 쓰고 나갔습니다.'; } },
+          return '미뤘습니다. 아무 말 없이 모자 쓰고 나갔심더. 두 달 뒤에 또 올 겁니더.'; } },
     ],
   };
 }
@@ -612,7 +875,7 @@ function idleCard(s, W) {
         + '기계는 세아놓으면 더 상합니더. 놀리느니 뭐라도 하는 게 낫심더.',
     opts: [
       { label: '이참에 대정비를 한다', hint: '놀 때 손본다', fx: ['−통장 $29,000', '+설비 크게 회복', '+품질'],
-        apply: (s, G) => { s.cash -= 29_000; W.equip = wClamp(W.equip + 28); W.maintAge = 0; W.deferMaint = 0; W.qBoost += 4;
+        apply: (s, G) => { s.cash -= 29_000; W.equip = wClamp(W.equip + 28); W.maintAge = 0; W.deferMaint = 0; W.maintCool = s.turn + 5; W.qBoost += 4;
           styleAdd(W, 'craft', 2); remember(W, s, 'maint', '비수기 대정비');
           lever(G, '비수기 대정비', { cash: -29_000, equip: 28 });
           return '바쁠 때는 죽어도 못 하는 걸 했심더. 이래 세아놓고 뜯어보기가 어렵습니더.'; } },
@@ -695,58 +958,6 @@ function peopleCard(s, W) {
 /* ============================================================
    고객 — 양보는 기억되고, 무시도 기억된다
    ============================================================ */
-function priceCard(s, W, k) {
-  const again = W.concede[k] > 0;
-  const why = cause(W, s, ['concede', 'volume'], k);
-  /* 가공마진이 톤당 $40인 장사다. 단가 협상은 달러 몇 개 단위로 움직인다.
-     한 번에 $10씩 깎이면 두 번 만에 마진이 없어진다 — 그건 협상이 아니라 폐업이다. */
-  const ask = Math.min(6, again ? 3 + W.concede[k] : 4);
-  const dep = (s.custShare[k] || 0) > 0.4;
-  const rumor = W.threat[k] ? '이번엔 경쟁사 견적서를 책상에 올려놨습니다. 진짜입니다.'
-                            : '경쟁사가 더 싸게 준다는데, 제가 보기엔 떠보는 겁니다. 확신은 못 합니다만.';
-  return {
-    id: 'w-price-' + k, who: 'jung', topic: 'price',
-    title: again ? `${cname(k)}가 또 단가를 깎아달랍니다` : `${cname(k)}가 단가 인하를 요구합니다`,
-    text: again
-      ? `사장님, 또 왔습니다. ${why || '지난번에'} 깎아줬더니 이번엔 톤당 $${ask}를 더 달랍니다. `
-        + `${rumor} ${dep ? '우리 물량의 절반이 거기입니다. 그쪽도 그걸 알고 부르는 값입니다.' : ''} `
-        + `제 말씀 드리면 — 한 번 열어준 문은 계속 두드립니다.`
-      : `${cname(k)} 구매팀장이 톤당 $${ask} 깎아달랍니다. ${rumor} `
-        + `${dep ? '우리가 거기 없으면 안 된다는 걸 그쪽도 압니다. 그래서 세게 나옵니다.' : ''}`,
-    opts: [
-      { label: '요구를 받아준다', hint: '물량과 관계를 지킨다',
-        fx: [`−${CUST[k]} 단가 −$${ask}/t (계속 유지)`, `+${CUST[k]} 관계 ↑`, '?다음에 또 요구할 가능성 ↑'],
-        apply: (s, G) => { W.cut[k] += ask; W.concede[k]++; W.rel[k] = wClamp(W.rel[k] + 7); W.stats.concessions++;
-          styleAdd(W, 'cust'); styleAdd(W, 'grow');
-          remember(W, s, 'concede', `${CUST[k]}에 $${ask} 양보`, { cust: k });
-          lever(G, `${CUST[k]} 단가 인하 수용`, { cut: [k, ask], rel: [[k, 7]] });
-          return `받아줬습니다. 구매팀장이 악수하면서 웃더군요. 그 웃음이 좀 걸립니다. 다음엔 더 세게 옵니다.`; } },
-      { label: '품질·납기 실적을 들고 설득한다', hint: '평소에 쌓은 게 있어야 통한다',
-        fx: ['?품질·관계가 좋아야 먹힌다', '+통하면 단가 유지'],
-        apply: (s, G) => { const ok = W.quality >= 72 && W.rel[k] >= 55 && wChance(0.75);
-          if (ok) { W.rel[k] = wClamp(W.rel[k] + 2); styleAdd(W, 'craft');
-            remember(W, s, 'persuade', `${CUST[k]} 품질로 설득`, { cust: k });
-            lever(G, `${CUST[k]} 품질로 설득 — 성공`, { rel: [[k, 2]] });
-            return `불량률하고 납기 준수율 자료 들고 갔습니다. 한 장씩 짚어가며 설명했더니 단가 유지하기로 했습니다. 이런 건 평소에 쌓아놔야 먹힙니다.`; }
-          const v = growCust(s, k, -0.12); W.rel[k] = wClamp(W.rel[k] - 6);
-          remember(W, s, 'hold', `${CUST[k]} 설득 실패`, { cust: k });
-          lever(G, `${CUST[k]} 품질로 설득 — 실패`, { vol: v, rel: [[k, -6]] });
-          return `자료 들고 갔는데 ${W.quality < 72 ? '오히려 우리 불량률이 역공 자료가 됐습니다. 얼굴이 화끈했습니다' : '거기까지 관계가 못 받쳐줬습니다'}. 물량 일부 빠졌습니다. 제 잘못입니다.`; } },
-      { label: '거절한다', hint: '마진을 지킨다',
-        fx: ['+단가 유지', `?경쟁사가 진짜면 ${CUST[k]} 물량 이탈`],
-        apply: (s, G) => { styleAdd(W, 'cash');
-          if (W.threat[k]) { const v = growCust(s, k, -0.25); W.rel[k] = wClamp(W.rel[k] - 10);
-            remember(W, s, 'hold', `${CUST[k]} 인하 요구 거절`, { cust: k });
-            lever(G, `${CUST[k]} 인하 거절 — 이탈`, { vol: v, rel: [[k, -10]] });
-            return `거절했습니다. 견적서는 진짜였고 물량 4분의 1이 넘어갔습니다. 제 감이 틀렸습니다. 그런 날도 있습니다.`; }
-          W.rel[k] = wClamp(W.rel[k] - 2);
-          remember(W, s, 'hold-ok', `${CUST[k]} 인하 요구 거절`, { cust: k });
-          lever(G, `${CUST[k]} 인하 거절 — 버팀`, { rel: [[k, -2]] });
-          return `거절했습니다. 알고 보니 경쟁사 얘기는 떠본 거였습니다. ${CUST[k]}는 그대로 남았습니다.`; } },
-    ],
-  };
-}
-
 function volumeCard(s, W, k, L) {
   const pct = wPick([0.25, 0.3, 0.35]);
   const cut = wPick([2, 3, 4, 5]);
@@ -842,22 +1053,6 @@ function churnCard(s, W, k) {
           return `${CUST[k]}는 놨습니다. 영업 인력은 전부 ${CUST[other]}에 붙였습니다. 매달리는 영업은 오래 못 갑니다.`; } },
     ],
   };
-}
-
-function custFocusCard(s, W) {
-  const card = customerCard(s);
-  card.topic = 'cust';
-  card.text += ` 참고로 지금 고객별 분위기는 ${Object.keys(CUST).map(k => `${CUST[k]} ${relLabel(W.rel[k])}`).join(', ')}입니다.`;
-  card.opts.forEach((o, i) => {
-    const k = Object.keys(CFG.CUSTOMERS)[i];
-    o.hint = `지금 거래의 ${Math.round((s.custShare[k] || 0) * 100)}% · 관계 ${relLabel(W.rel[k])}`;
-    const inner = o.apply;
-    o.apply = (st, G) => { W.rel[k] = wClamp(W.rel[k] + 5); styleAdd(W, 'cust');
-      remember(W, st, 'focus', `${CUST[k]} 집중 영업`, { cust: k });
-      lever(G, `${CUST[k]} 집중 영업`, { rel: [[k, 5]], risk: '효과는 석 달 뒤' });
-      return inner(st, G); };
-  });
-  return card;
 }
 
 function creditCard(s, W) {

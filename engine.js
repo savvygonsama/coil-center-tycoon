@@ -364,6 +364,10 @@ function createInitialState(opt = {}) {
     // 개업 시점의 고객 구성. 본사가 붙여준 일본계·구미계 자동차가 중심이다.
     custShare: { JP: 0.35, EU: 0.30, CN: 0.05, PART: 0.18, HOME: 0.12 },
     custQueue: [],
+    /* 영업 자원 배분 — 반기마다 사장이 100점을 고객군에 나눠 준다.
+       배분받은 곳은 조금씩 늘고, 한 점도 못 받은 곳은 조금씩 빠진다.
+       전임 사장이 남긴 배분으로 시작한다. */
+    salesMix: { JP: 30, EU: 30, CN: 0, PART: 25, HOME: 15 },
     cum: { sales: { C2C: 0, SLIT: 0, LEVEL: 0, BLANK: 0 }, revenue: 0, op: 0, np: 0 },
     hqSpotCredit: 0,
     buildings: 1,
@@ -640,7 +644,7 @@ function resolveTurn(state, decision) {
     run:     { SLIT: 0, LEVEL: 0, TRAP: 0, DIE: 0, ...(decision.run || {}) },
     sell:    { C2C: 0, SLIT: 0, LEVEL: 0, TRAP: 0, DIE: 0, ...(decision.sell || {}) },
     invest:  { addLine: null, newBuilding: false, salesEffort: 0, yieldProgram: 0, ...(decision.invest || {}) },
-    options: { overtime: false, discount: 0, trimYield: 0, custFocus: null, ...(decision.options || {}) },
+    options: { overtime: false, discount: 0, trimYield: 0, custFocus: null, salesMix: null, ...(decision.options || {}) },
   };
 
   const log = [];
@@ -669,22 +673,34 @@ function resolveTurn(state, decision) {
     if (gain > 0) log.push(`영업 투자 효과가 나타났습니다. 점유율 +${(gain * 100).toFixed(2)}%p`);
   }
 
-  /* STEP 2b. 고객군 영업 — 매달 한 고객군을 골라 공을 들인다. 결실은 석 달 뒤.
-     손 놓은 고객군은 조금씩 빠지고, 성질 급한 고객군은 어느 달 갑자기 빠진다. */
+  /* STEP 2b. 고객군 영업 — 반기마다 정한 영업 자원 배분(100점)이 매달 조금씩 일한다.
+     자원을 받은 고객군은 늘고, 한 점도 못 받은 고객군은 서서히 빠진다.
+     배분을 바꿔도 석 달 뒤부터 먹힌다 — 영업은 그날 가서 그날 되는 일이 아니다.
+     성질 급한 고객군은 그와 별개로 어느 달 갑자기 빠진다. */
   const crashes = [];
   {
     s.custShare = s.custShare || {};
     s.custQueue = (s.custQueue || []).filter(q => {
       if (q.turn > s.turn) return true;
-      s.custShare[q.key] = (s.custShare[q.key] || 0) + CFG.CUST_GAIN;
-      log.push(`${CFG.CUSTOMERS[q.key].name} 영업이 결실을 봤습니다. 거래 비중이 늘었습니다.`);
+      if (q.mix) {
+        s.salesMix = q.mix;
+        log.push('석 달 전에 바꾼 영업 자원 배분이 이제부터 숫자로 나옵니다.');
+      }
       return false;
     });
-    const focus = d.options.custFocus;
-    if (focus && CFG.CUSTOMERS[focus]) s.custQueue.push({ key: focus, turn: s.turn + CFG.SALES_EFFORT_LAG });
+    if (d.options.salesMix) s.custQueue.push({ mix: { ...d.options.salesMix }, turn: s.turn + CFG.SALES_EFFORT_LAG });
+
+    const mix = s.salesMix || {};
+    const mixTot = Object.keys(CFG.CUSTOMERS).reduce((a, k) => a + Math.max(0, mix[k] || 0), 0);
     for (const k in CFG.CUSTOMERS) {
-      const pending = s.custQueue.some(q => q.key === k);
-      if (k !== focus && !pending) s.custShare[k] = Math.max(0.01, (s.custShare[k] || 0) * (1 - CFG.CUST_DECAY));
+      const p = mixTot > 0 ? Math.max(0, mix[k] || 0) / mixTot : 0;
+      if (p > 0) {
+        // 같은 자원을 부어도 크는 속도는 고객군 성격을 탄다
+        const g = 0.6 + CFG.CUSTOMERS[k].grow * 0.4;
+        s.custShare[k] = (s.custShare[k] || 0) * (1 + CFG.CUST_GAIN * p * g);
+      } else {
+        s.custShare[k] = Math.max(0.01, (s.custShare[k] || 0) * (1 - CFG.CUST_DECAY));
+      }
     }
     for (const k in CFG.CUSTOMERS) {
       const c = CFG.CUSTOMERS[k];
