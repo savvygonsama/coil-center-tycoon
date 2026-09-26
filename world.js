@@ -304,7 +304,10 @@ function worldPost(s, W, R, G) {
   W.threat = {};
   for (const k in CUST) {
     const sh = s.custShare[k] || 0;
-    const p = Math.max(0, W.comp - 25) / 100 * (0.6 + sh * 2) * (1 + W.concede[k] * 0.3);
+    /* 경쟁사가 실제로 견적을 들고 들어오는 확률.
+       단가로만 움직이는 고객군일수록(askAdd) 경쟁사도 더 자주 들이댄다. */
+    const tough = 1 + (CFG.CUSTOMERS[k].askAdd || 0) * 0.35;
+    const p = Math.max(0, W.comp - 25) / 100 * (0.6 + sh * 2) * (1 + W.concede[k] * 0.3) * tough;
     if (wChance(p)) W.threat[k] = true;
   }
 

@@ -469,11 +469,16 @@ function negoCard(s, W, k, L) {
      단가가 협상 자리 밖에서 움직이지 않게 하려고 만든 장치다 —
      다른 카드는 약속만 할 수 있고, 값은 언제나 이 자리에서 치른다. */
   const pledged = (W.pledge || {})[k] || 0;
+  /* 인하를 거절했을 때 실제로 빠져나가는 물량. 고객군마다 다르다 —
+     일본계는 단가 때문에 거래처를 바꾸지 않고(8%), 중국 전기차는 그것만으로 바꾼다(38%).
+     "물량은 빨리 느는데 협상이 터프해서 안 받아주면 늘려놓은 걸 뺏긴다"가 이 숫자다. */
+  const hold = c.holdLoss ?? 0.22;
 
-  /* 고객이 부르는 값 — 시황·경쟁·의존도가 정한다. 가공마진이 톤당 $40인 장사라
-     여기서 $6을 내주면 그 고객 마진의 15%가 한 번에 날아간다. */
-  const ask = Math.max(pledged, Math.max(0, Math.min(7,
-    2 + (I.slack ? 2 : 0) + (I.threat ? 2 : 0) + (I.comp > 50 ? 1 : 0) + (I.dep ? 1 : 0) - (I.tight ? 2 : 0))));
+  /* 고객이 부르는 값 — 시황·경쟁·의존도, 그리고 그 고객군이 원래 얼마나 세게 부르는지(askAdd)가 정한다.
+     가공마진이 톤당 $40인 장사라 여기서 $6을 내주면 그 고객 마진의 15%가 한 번에 날아간다. */
+  const ask = Math.max(pledged, Math.max(0, Math.min(9,
+    2 + (c.askAdd || 0)
+    + (I.slack ? 2 : 0) + (I.threat ? 2 : 0) + (I.comp > 50 ? 1 : 0) + (I.dep ? 1 : 0) - (I.tight ? 2 : 0))));
   /* 우리가 올려 부를 수 있는 값 */
   const up = Math.max(2, Math.min(6, 2 + (I.tight ? 2 : 0) + (I.pmUp ? 1 : 0) + (I.cut >= 6 ? 1 : 0)));
 
@@ -547,20 +552,22 @@ function negoCard(s, W, k, L) {
     hint: pledged ? '약속을 깬다 — 관계가 무너진다'
         : I.threat ? '경쟁사 견적이 진짜다 — 위험하다' : '경쟁사 얘기는 떠보는 것 같다',
     fx: ['+단가 지킴', pledged ? `?${CUST[k]} 관계 급락 · 물량 큰 폭 이탈`
-       : I.threat ? `?${CUST[k]} 물량 이탈 위험 큼` : `?${CUST[k]} 서운함`],
+       : I.threat ? `?${CUST[k]} 물량 ${Math.round(hold * 100)}% 이탈 위험` : `?${CUST[k]} 서운함`],
     apply: (st, G) => {
       styleAdd(W, 'cash');
       if (pledged) {
-        const v = growCust(st, k, -0.30); W.rel[k] = wClamp(W.rel[k] - 20);
+        const v = growCust(st, k, -Math.max(0.30, hold * 1.2)); W.rel[k] = wClamp(W.rel[k] - 20);
         return close(`${CUST[k]} 약속 파기 — 동결`, 'renege',
           `약속을 뒤집었습니다. 구매팀장이 수첩을 덮고 아무 말 없이 일어섰습니다. `
           + `물량이 크게 빠졌고, 이 회사에서 제 얼굴은 당분간 안 팔립니다.`,
           { vol: v, rel: [[k, -20]], risk: '관계 회복에 1년' })(st, G);
       }
       if (I.threat) {
-        const v = growCust(st, k, -0.22); W.rel[k] = wClamp(W.rel[k] - 8);
-        return close(`${CUST[k]} 동결 — 물량 이탈`, 'hold',
-          `동결로 갔습니다. 견적서는 진짜였고 물량 5분의 1이 넘어갔습니다. 제가 확인해 드렸는데도 가신 거니 제 탓은 아닙니다만, 기분은 좋지 않습니다.`,
+        const v = growCust(st, k, -hold); W.rel[k] = wClamp(W.rel[k] - 8);
+        return close(`${CUST[k]} 동결 — 물량 ${Math.round(hold * 100)}% 이탈`, 'hold',
+          `동결로 갔습니다. 견적서는 진짜였고 물량 ${Math.round(hold * 100)}%가 넘어갔습니다. `
+          + `${hold >= 0.3 ? '이 고객군은 원래 단가로만 움직입니다. 관계로 붙잡을 수 있는 데가 아닙니다.'
+                           : '제가 확인해 드렸는데도 가신 거니 제 탓은 아닙니다만, 기분은 좋지 않습니다.'}`,
           { vol: v, rel: [[k, -8]] })(st, G);
       }
       W.rel[k] = wClamp(W.rel[k] - 2);

@@ -149,26 +149,35 @@ const CFG = {
        margin  톤당 판가 가감          vol   내시 변동폭
        bad     월 대손 확률            dso   대금 회수 개월
        blank   블랭킹 수주 비중        grow  물량 성장 배수
-       crash   갑자기 물량이 빠질 확률 */
+       crash   모델 단종 등으로 물량이 한 번에 빠질 확률
+       crashDrop 그때 빠지는 폭 (없으면 CFG.CRASH_DROP)
+       askAdd  정기 단가 협상에서 더 세게 부르는 정도 ($/t)
+       holdLoss 인하 요구를 거절했을 때 실제로 빠져나가는 물량 비율 */
   CUSTOMERS: {
     JP:   { name: '일본계 자동차', emoji: '🇯🇵', margin: -5, vol: 0.04, bad: 0.000, dso: 3,
-            blank: 0.08, grow: 0.55, crash: 0.00,
+            blank: 0.08, grow: 0.55, crash: 0.00, askAdd: 0, holdLoss: 0.08,
             good: '내시가 흔들리지 않습니다. 떼일 일이 없습니다.',
             bad_: '마진이 박합니다. 물량이 크게 늘지도 않습니다.' },
     EU:   { name: '미주·구주 자동차', emoji: '🌍', margin: 0, vol: 0.09, bad: 0.002, dso: 3,
-            blank: 0.14, grow: 1.00, crash: 0.02,
+            blank: 0.14, grow: 1.00, crash: 0.02, askAdd: 1, holdLoss: 0.20,
             good: '물량이 크고 단가도 무난합니다.',
             bad_: '규격이 까다롭고 감사가 잦습니다.' },
-    CN:   { name: '중국 전기차', emoji: '⚡', margin: +7, vol: 0.28, bad: 0.011, dso: 4,
-            blank: 0.45, grow: 2.10, crash: 0.11,
-            good: '물량이 폭발적으로 늘고 단가도 좋습니다. 신생사가 많아 블랭킹까지 맡깁니다.',
-            bad_: '어느 달 갑자기 내시가 빠집니다. 그 물량이 그대로 장기재고가 되고, 채권도 위험합니다.' },
+    /* 중국 전기차는 "망하는 고객"이 아니다. 크는 고객인데 크는 만큼 어렵다.
+         물량은 제일 빨리 붇는다 (grow)
+         반기마다 단가를 세게 부르고, 안 받아주면 늘려놓은 물량이 그대로 빠진다 (askAdd·holdLoss)
+         모델별 내시가 들쭉날쭉해서 그 물량 보고 들여온 소재가 장기재고로 남는다 (vol)
+       망하는 게 아니라 이 셋을 감당하느냐의 문제다. 그래서 crash는 낮추고 나머지를 키웠다. */
+    CN:   { name: '중국 전기차', emoji: '⚡', margin: +7, vol: 0.45, bad: 0.011, dso: 4,
+            blank: 0.45, grow: 2.60, crash: 0.05, crashDrop: 0.20, askAdd: 2, holdLoss: 0.38,
+            good: '물량이 제일 빨리 붑니다. 단가도 좋고 블랭킹까지 맡깁니다.',
+            bad_: '반기마다 단가를 세게 부르고, 안 받아주면 늘려놓은 물량이 그대로 빠집니다. '
+                + '모델별 내시가 들쭉날쭉해서 그 물량 보고 들여온 소재가 장기재고로 남습니다.' },
     PART: { name: '자동차 부품사', emoji: '🔩', margin: +8, vol: 0.13, bad: 0.004, dso: 3,
-            blank: 0.32, grow: 0.95, crash: 0.03,
+            blank: 0.32, grow: 0.95, crash: 0.03, askAdd: 1, holdLoss: 0.16,
             good: '소량 다품종이라 가공 마진이 좋습니다.',
             bad_: '납기가 빡빡하고 규격이 잘게 쪼개집니다.' },
     HOME: { name: '가전·강건재', emoji: '🏠', margin: +2, vol: 0.20, bad: 0.003, dso: 2,
-            blank: 0.18, grow: 1.15, crash: 0.05,
+            blank: 0.18, grow: 1.15, crash: 0.05, askAdd: 1, holdLoss: 0.28,
             good: '대금을 빨리 줍니다. 현금 회전에 도움이 됩니다.',
             bad_: '가격에 아주 민감하고 주문이 들쭉날쭉합니다.' },
   },
@@ -705,9 +714,13 @@ function resolveTurn(state, decision) {
     for (const k in CFG.CUSTOMERS) {
       const c = CFG.CUSTOMERS[k];
       if (c.crash > 0 && (s.custShare[k] || 0) > 0.05 && rng() < c.crash) {
-        s.custShare[k] *= 1 - CFG.CRASH_DROP;
+        const drop = c.crashDrop ?? CFG.CRASH_DROP;
+        s.custShare[k] *= 1 - drop;
         crashes.push(k);
-        flags.push(`${c.name} 내시가 갑자기 빠졌습니다. 그 물량 보고 들여온 소재가 창고에 남습니다.`);
+        // 전기차는 모델 주기가 짧아서 한 모델이 끝나면 그 규격이 통째로 사라진다
+        flags.push(c.grow >= 2
+          ? `${c.name} 쪽 모델 하나가 단종됐습니다. 그 규격으로 들여온 소재가 그대로 창고에 남습니다.`
+          : `${c.name} 내시가 갑자기 빠졌습니다. 그 물량 보고 들여온 소재가 창고에 남습니다.`);
       }
     }
     let tot = 0;
