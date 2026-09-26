@@ -524,6 +524,22 @@
   @media(max-width:760px){ .custbar{grid-template-columns:120px 1fr 62px 72px 84px;font-size:13px}
     .custbar .leak{grid-column:1 / -1;text-align:right;margin-top:-4px} }
 
+  /* 발주 미리보기 — 부작용 없는 예측이라 색만으로 말하지 않고 숫자와 단어를 같이 쓴다 */
+  .fx .fxm{font-style:normal;font-weight:900;margin-right:1px}
+  .ofc{margin-top:10px;border-top:2px dashed var(--line);padding-top:10px}
+  .ordt.fct th{background:var(--panel2);color:var(--ink);font-size:11px}
+  .ordt.fct td{font-size:12px;padding:4px 5px}
+  .ordt td.capby{font-size:10.5px;color:var(--dim);font-weight:700;white-space:nowrap}
+  .ordt td.warn,.fcnote .warn{color:#8a6410;font-weight:800}
+  .fcnote{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:7px;font-size:12.5px;font-weight:700}
+  .fcnote.alt{color:var(--dim);font-weight:600;font-size:12px}
+  .fcnote .est{font-style:italic}
+  .osum .sub{font-weight:600;color:var(--dim);font-size:12.5px}
+  @media(max-width:560px){ .ordt.fct th,.ordt.fct td{font-size:10.5px;padding:3px 2px}
+    .ordt .capby{display:none}
+    .ordwrap{overflow-x:auto}
+    .ordt{min-width:340px} }
+
   /* 영업 자원 배분 표 — 0점을 준 줄은 눈에 보이게 죽인다 */
   .ordt tr.off td{opacity:.5;background:var(--panel2)}
   .ordt tr.off td.oname::after{content:' · 무관리';font-size:10.5px;color:var(--rust);font-weight:800}

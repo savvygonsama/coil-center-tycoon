@@ -215,13 +215,18 @@ function deltaChips(a, b) {
 
 /* 효과 칩 — 고르기 전에 뭘 얻고 뭘 잃는지 보인다.
    앞 글자로 색을 정한다. + 이득 / − 손해 / ? 도박 / = 중립 */
+/* 선택지에 붙는 효과 칩.
+   부호를 색으로만 말하면 안 된다 — 색약이거나 흑백으로 보면 +와 −가 같아진다.
+   그래서 기호를 지우지 않고 앞에 그대로 남긴다. */
+const FX_MARK = { '+': '▲', '−': '▼', '-': '▼', '?': '⚠', '=': '=' };
 function fxChips(list) {
   if (!list || !list.length) return '';
-  return `<div class="fx">${list.map(t => {
+  return `<div class="fx">${list.filter(Boolean).map(t => {
     const k = t[0];
-    const cls = k === '+' ? 'up' : k === '−' || k === '-' ? 'dn' : k === '?' ? 'rsk' : 'neu';
-    const body = '+−-?='.includes(k) ? t.slice(1) : t;
-    const mark = k === '?' ? '⚠ ' : '';
+    const known = '+−-?='.includes(k);
+    const cls = k === '+' ? 'up' : (k === '−' || k === '-') ? 'dn' : k === '?' ? 'rsk' : 'neu';
+    const body = known ? t.slice(1) : t;
+    const mark = known ? `<b class="fxm">${FX_MARK[k]}</b> ` : '';
     return `<span class="${cls}">${mark}${body}</span>`;
   }).join('')}</div>`;
 }
@@ -274,14 +279,42 @@ function openDecisions() {
     for (const r of rows) vals[r.k] = r.rec;
     const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
 
+    /* 수량을 고칠 때마다 다시 그린다. 부작용 없는 orderForecast로만 계산하므로
+       미리보기가 게임 상태나 난수를 건드리지 않는다. */
     const paint = () => {
       const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
       const totRec = rows.reduce((a, r) => a + r.rec, 0);
       const pct = totRec > 0 ? Math.round(tot / totRec * 100) : 100;
       const box = dlg.querySelector('#osum');
       if (box) box.innerHTML =
-        `<b>합계 ${fmt(Math.round(tot))}톤</b>
-         <span class="${pct > 125 ? 'dn' : pct < 75 ? 'dn' : 'up'}">권장 대비 ${pct}%</span>`;
+        `<b>합계 ${fmt(Math.round(tot))}톤</b>`
+        + (card.months > 1 ? `<span class="sub">월 ${fmt(Math.round(tot / card.months))}톤씩 석 달</span>` : '')
+        + `<span class="${pct > 125 || pct < 75 ? 'dn' : 'up'}">권장 대비 ${pct}%</span>`;
+
+      const f = orderForecast(G.s, rows, vals);
+      const up = orderForecast(G.s, rows, vals, { demand: 1.2 });
+      const late = orderForecast(G.s, rows, vals, { late: 1 });
+      const fc = dlg.querySelector('#ofc');
+      if (!fc) return;
+      const yl = v => v > 1 ? 'dn' : v > 0.85 ? 'warn' : 'up';
+      fc.innerHTML = `
+        <table class="ordt fct">
+          <tr><th>예상</th>${f.rows.map(r => `<th>${dateLabel(r.turn).replace(/^\d+년 /, '')}</th>`).join('')}</tr>
+          <tr><td class="oname">입고</td>${f.rows.map(r => `<td>${r.arrive ? fmt(r.arrive) : '–'}</td>`).join('')}</tr>
+          <tr><td class="oname">월말 재고</td>${f.rows.map(r => `<td class="${r.short ? 'dn' : ''}">${r.short ? '결품' : fmt(r.stock)}</td>`).join('')}</tr>
+          <tr><td class="oname">야드 점유</td>${f.rows.map(r => `<td class="${yl(r.yard)}">${Math.round(r.yard * 100)}%</td>`).join('')}</tr>
+          <tr><td class="oname">재고율(개월)</td>${f.rows.map(r => `<td>${r.coverM.toFixed(1)}</td>`).join('')}</tr>
+        </table>
+        <div class="fcnote">
+          <span class="${f.over ? 'dn' : 'up'}">야드 최대 ${Math.round(f.peakYard * 100)}%${f.over ? ' · 한도 초과' : ''}</span>
+          <span class="${f.shortMonths ? 'dn' : 'up'}">결품 ${f.shortMonths ? f.shortMonths + '개월' : '없음'}</span>
+          <span>소재 대금 ${money(f.cashTie)} · ${CFG.DPO_TURNS}개월 뒤 결제</span>
+        </div>
+        <div class="fcnote alt">
+          <span>수요 +20%면 야드 ${Math.round(up.peakYard * 100)}% · 결품 ${up.shortMonths}개월</span>
+          <span>입고 1개월 지연이면 결품 ${late.shortMonths}개월</span>
+          <span class="est">추정치입니다. 확정 결과가 아닙니다.</span>
+        </div>`;
     };
 
     dlg.innerHTML = `<div class="dlg">${head}
@@ -293,6 +326,7 @@ function openDecisions() {
           <tr><th>고객군</th><th>${card.months > 1 ? '분기 사용<br><i>석 달치 · 소재' : '월 사용<br><i>소재'} 기준</i></th>
               <th>창고<br>현물</th><th>해상<br>미착</th>
               <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th>
+              <th class="capby">권장<br>막힌 곳</th>
               <th>${card.months > 1 ? '분기 발주 (톤)' : '발주 (톤)'}</th></tr>
           ${rows.map(r => `<tr>
             <td class="oname">${CUST[r.k]} <i>${CFG.CUSTOMERS[r.k].name}</i></td>
@@ -302,6 +336,7 @@ function openDecisions() {
             <td>${fmt(Math.round(r.prod))}</td>
             <td class="${r.invM < COVER.warn ? 'dn' : ''}">${r.invM.toFixed(1)}</td>
             <td>${r.resM.toFixed(1)}</td>
+            <td class="capby">${r.capBy}</td>
             <td><input type="number" min="0" max="${r.max}" step="50" data-ok="${r.k}" value="${r.rec}"></td>
             </tr>`).join('')}
         </table>
@@ -314,11 +349,12 @@ function openDecisions() {
             <button class="mini" data-set="1.2">권장 ×1.2</button>
           </div>
         </div>
+        <div id="ofc" class="ofc"></div>
         <p class="hint">고객군별 재고는 판매 비중으로 배분한 추정치입니다. 같은 규격을 여러 고객이 쓰니
           칼같이 갈리지는 않습니다. 지금 걸면 <b>${lead}개월 뒤</b> 야드에 내립니다.<br>
-          본사 압연 스케줄 때문에 ${card.months > 1 ? '분기' : '한 달'} 소요량의 <b>1.6배</b>까지만 걸 수 있습니다 —
-          한 번 바닥나면 금방은 못 메웁니다.
-          ${card.months > 1 ? '<br>적어주신 톤수는 석 달에 나눠서 집행합니다.' : ''}</p>
+          권장량은 <b>소요량 + (목표 재원 − 현재 재원)</b>이고, 본사 압연 한도(${card.months > 1 ? '분기' : '한 달'}
+          소요량의 1.6배)와 <b>야드 여유</b>에 걸리면 거기서 잘립니다. 표의 「막힌 곳」이 무엇이 잘랐는지입니다.
+          ${card.months > 1 ? '<br>적어주신 톤수는 <b>3분의 1씩 세 달에 나눠</b> 집행합니다. 도착도 그만큼 나뉩니다.' : ''}</p>
         <button class="primary" id="osubmit">${card.months > 1 ? '이대로 분기 발주' : '이대로 발주한다'}</button>
       </div>
     </div>`;
@@ -603,12 +639,69 @@ function orderRows(s, L) {
        그건 권장량에 반영한다. 사장이 적어낸 숫자에 몰래 곱하면 안 된다 —
        5,000톤이라고 적었는데 8,500톤이 나가면 그건 결재가 아니다. */
     const cardMult = (G && G.mult) || 1;
-    const rec = Math.min(MAX, Math.max(0, ceiling - res),
-      Math.max(0, use + useM * aim - res) * cardMult);
+    /* 야드에 들어갈 자리가 없으면 아무리 필요해도 권장할 수 없다.
+       엔진은 "입고 직후 · 출하 전"의 피크 재고로 야드 정체를 판정한다(engine.js STEP 5b).
+       그래서 월말 재고가 아니라 피크 기준으로 여유를 잡아야 한다 —
+       전에는 이 제약이 아예 없어서 권장량을 그대로 걸면 야드 한도를 2만 톤 넘기고
+       동선이 막혀 가동률이 12% 떨어졌다.
+       정상 상태에서는 "그 기간에 쓸 만큼"만 걸어야 재고가 제자리에 선다. 거기에
+       지금 비어 있는 자리만큼만 더 채울 수 있다. 리드타임 동안 빠져나갈 양을 통째로
+       더해주면(need × lead) 매달 그만큼 과발주가 되어 야드가 계속 넘친다 — 실제로 그랬다. */
+    const yardRoom = use + Math.max(0,
+      CFG.WAREHOUSE_CAP_BASE * 0.90 - onhand - sea) * sh;
+    const base = Math.max(0, use + useM * aim - res) * cardMult;
+    const rec = Math.min(MAX, Math.max(0, ceiling - res), base, yardRoom);
+    // 권장량이 무엇에 막혔는지 화면에 적어준다 — 근거 없는 숫자를 그대로 믿게 하지 않는다
+    const capBy = rec >= base - 1 ? '소요·재원' : rec >= MAX - 1 ? '본사 압연 한도'
+                : rec >= yardRoom - 1 ? '야드 여유' : '재원 천장';
     return { k, sh, use, oh, sea: se, prod: pr, inv, res, max: Math.round(MAX / 50) * 50,
       invM: useM > 0 ? inv / useM : 0, resM: useM > 0 ? res / useM : 0,
+      capBy, yardRoom: Math.round(yardRoom), useM,
       rec: Math.round(rec / 50) * 50 };
   }).filter(r => r.sh > 0.01);
+}
+
+/* 부작용 없는 예측. 발주량을 넣으면 월별로 재고·야드·재원이 어떻게 갈지 돌려준다.
+   상태도 난수도 건드리지 않는다 — 읽기만 한다. 미리보기가 게임을 바꾸면 안 된다. */
+function orderForecast(s, rows, vals, opt = {}) {
+  const mo = orderMonths();
+  const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
+  const demandMult = opt.demand ?? 1;      // 수요 증가 시나리오
+  const lateBy = opt.late ?? 0;            // 입고 지연 시나리오 (개월)
+  const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
+  const perMonth = tot / mo;
+  const useM = rows.reduce((a, r) => a + r.useM, 0) * demandMult;
+
+  /* 예측의 1번째 달 = 지금 결재하고 곧 돌릴 달.
+     엔진은 etaTurn <= turn인 PO를 그 달에 내리므로, etaTurn === s.turn인 배는 1번째 달에 도착한다.
+     같은 이유로 지금 거는 발주는 (lead + 1)번째 달에 내린다. 여기를 한 달 당기면
+     "입고 지연" 시나리오가 오히려 결품이 줄어드는 거꾸로 된 결과가 나온다. */
+  let onhand = inventoryTons(s);
+  const incoming = {};
+  for (const p of s.poOpen) {
+    const m = Math.max(1, p.etaTurn - s.turn + 1) + lateBy;
+    incoming[m] = (incoming[m] || 0) + p.qty;
+  }
+  // 이번에 거는 것 — i번째 달에 perMonth씩 걸고 lead개월 뒤 도착
+  for (let i = 0; i < mo; i++) {
+    const m = i + 1 + lead + lateBy;
+    incoming[m] = (incoming[m] || 0) + perMonth;
+  }
+  const cap = CFG.WAREHOUSE_CAP_BASE;
+  const out = [];
+  for (let m = 1; m <= mo + lead + 1; m++) {
+    onhand = onhand + (incoming[m] || 0) - useM;
+    const short = onhand < 0;
+    if (short) onhand = 0;
+    out.push({ turn: s.turn + m - 1, arrive: Math.round(incoming[m] || 0),
+      stock: Math.round(onhand), yard: onhand / cap, coverM: useM > 0 ? onhand / useM : 0, short });
+  }
+  const peak = Math.max(...out.map(o => o.stock));
+  return { rows: out, tot, perMonth: Math.round(perMonth), peak,
+    peakYard: peak / cap, over: peak > cap,
+    shortMonths: out.filter(o => o.short).length,
+    // 소재 대금은 B/L 90일 조건이라 DPO_TURNS 뒤에 나간다. 그 사이 현금이 묶인다.
+    cashTie: Math.round(tot * s.market.pm) };
 }
 
 function orderCard(s, W, L) {
@@ -639,6 +732,10 @@ function orderCard(s, W, L) {
       const rec = rows.reduce((a, r) => a + r.rec, 0);
       G.ui.orderBy = { ...vals };
       G.ui.orderTon = tot;
+      /* 월별 집행 계획. 화면에 "세 달에 나눠서 집행합니다"라고 적었으면 실제로 그렇게 나가야 한다.
+         마지막 달이 반올림 잔차를 받는다 — 합계는 사장이 적어낸 숫자와 정확히 같다. */
+      const per = Math.round(tot / mo / 10) * 10;
+      G.ui.orderPlan = Array.from({ length: mo }, (_, i) => i === mo - 1 ? Math.round(tot - per * (mo - 1)) : per);
       const ratio = rec > 0 ? tot / rec : 1;
       const tag = ratio > 1.25 ? 'overbuy' : ratio < 0.75 ? 'underbuy' : 'normal-buy';
       remember(W, s, tag, `소재 발주 ${fmt(Math.round(tot))}톤 (권장의 ${Math.round(ratio * 100)}%)`);
@@ -1254,7 +1351,8 @@ function expandCard(type, L, s) {
         + `석 달치만 쳐도 ${money(feed)}입니더. 기계는 한 번 사면 끝인데 소재는 매달 들어갑니더.`,
     opts: [
       { label: '짓겠습니다', hint: `${CFG.INSTALL_TURNS}개월 뒤 가동`,
-        fx: [`−설비 ${money(total)}`, `−소재 ${money(feed)} 추가로 묶임`,
+        // 설비 대금은 착공하는 이번 달 결산에서 나간다. 여기서 바로 통장이 줄지 않는다.
+        fx: [`−설비 ${money(total)} (이번 달 결산에서 차감)`, `−소재 ${money(feed)} 추가로 묶임`,
              `+${CFG.INSTALL_TURNS}개월 뒤 캐파 ↑`],
         apply: (st, g) => { g.ui.expandPick = type;
           return `${CFG.LINE[type].label} 발주 넣었심더. ${CFG.INSTALL_TURNS}개월 뒤부터 돕니더. `
@@ -1564,15 +1662,17 @@ function advance() {
     const savedFC = CFG.FC_BASE;
     if (G.extraFixed) CFG.FC_BASE += G.extraFixed;
 
-    /* 증설·본사 지시·고객 영업은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
-       발주와 가동은 석 달 내내 그 방침대로 돈다. */
-    /* 속성 모드는 한 번 결재로 석 달을 돈다.
-       증설·본사 지시·고객군 영업은 분기 첫 달에만 집행한다.
-       소재 발주도 분기 첫 달에 석 달치를 한 장으로 건다 —
-       사장이 적어낸 숫자가 곧 그 분기에 나가는 전부다.
-       나머지 두 달은 0으로 둔다. 자동으로 더 나가면 그건 결재가 아니다. */
-    const ui = i === 0 ? G.ui
-             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, salesMix: null, orderTon: 0 };
+    /* 증설·본사 지시·영업 자원 배분은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
+
+       소재 발주는 다르다. 사장이 적어낸 건 석 달치이고, 화면에도 "세 달에 나눠서 집행합니다"라고
+       적혀 있다. 그런데 예전에는 첫 달에 석 달치를 통째로 걸었다. 그래서
+         · 한 달에 4만 톤이 한 번에 들어와 야드 한도를 넘겼고
+         · 2·3월엔 발주가 0이라 다음 분기 시작 시점의 해상 미착·본사 생산 중이 전부 0이었다.
+       화면 설명과 실제가 달랐다. 이제 G.ui.orderPlan에 월별 집행량을 담아 그대로 매달 건다. */
+    const plan = G.ui.orderPlan;
+    const monthTon = plan ? (plan[i] ?? 0) : (i === 0 ? G.ui.orderTon : 0);
+    const ui = i === 0 ? { ...G.ui, orderTon: monthTon }
+             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, salesMix: null, orderTon: monthTon };
     worldPre(s, G.W);                       // 설비·품질이 이번 달 캐파와 수율을 정한다
     const res = resolveTurn(s, buildDecision(s, ui));
     worldPost(res.state, G.W, res.report, G); // 결과가 설비·관계·피로를 움직이고, 다음 사건을 부른다
@@ -1594,7 +1694,7 @@ function advance() {
 
   G.resultLines = [];
   G.turnDiscount = 0;
-  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null, salesMix: null, orderTon: null, orderBy: null });
+  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null, salesMix: null, orderTon: null, orderBy: null, orderPlan: null });
   showReport(mergeReports(reports));
 }
 

@@ -524,6 +524,22 @@
   @media(max-width:760px){ .custbar{grid-template-columns:120px 1fr 62px 72px 84px;font-size:13px}
     .custbar .leak{grid-column:1 / -1;text-align:right;margin-top:-4px} }
 
+  /* 발주 미리보기 — 부작용 없는 예측이라 색만으로 말하지 않고 숫자와 단어를 같이 쓴다 */
+  .fx .fxm{font-style:normal;font-weight:900;margin-right:1px}
+  .ofc{margin-top:10px;border-top:2px dashed var(--line);padding-top:10px}
+  .ordt.fct th{background:var(--panel2);color:var(--ink);font-size:11px}
+  .ordt.fct td{font-size:12px;padding:4px 5px}
+  .ordt td.capby{font-size:10.5px;color:var(--dim);font-weight:700;white-space:nowrap}
+  .ordt td.warn,.fcnote .warn{color:#8a6410;font-weight:800}
+  .fcnote{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:7px;font-size:12.5px;font-weight:700}
+  .fcnote.alt{color:var(--dim);font-weight:600;font-size:12px}
+  .fcnote .est{font-style:italic}
+  .osum .sub{font-weight:600;color:var(--dim);font-size:12.5px}
+  @media(max-width:560px){ .ordt.fct th,.ordt.fct td{font-size:10.5px;padding:3px 2px}
+    .ordt .capby{display:none}
+    .ordwrap{overflow-x:auto}
+    .ordt{min-width:340px} }
+
   /* 영업 자원 배분 표 — 0점을 준 줄은 눈에 보이게 죽인다 */
   .ordt tr.off td{opacity:.5;background:var(--panel2)}
   .ordt tr.off td.oname::after{content:' · 무관리';font-size:10.5px;color:var(--rust);font-weight:800}
@@ -2007,7 +2023,7 @@ const DECK = {
         { label: '고객을 흡수한다', hint: '영업을 총동원한다', fx: ['−통장 $150,000', '+물량 12%'],
           apply: s => { s.cash -= 150_000; s.myShare *= 1.12;
             return '영업을 총동원했습니다. 고객 넷을 데려왔습니다.'; } },
-        { label: '설비를 헐값에 산다', hint: '슬리터 1기를 반값에', fx: ['−통장 $1.2M', '+넉 달 뒤 슬리터 가동'],
+        { label: '설비를 헐값에 산다', hint: '슬리터 1기를 반값에', fx: ['−통장 $1,200,000', '+넉 달 뒤 슬리터 가동'],
           apply: s => { s.cash -= 1_200_000;
             s.buildQueue = s.buildQueue || [];
             s.buildQueue.push({ type: 'SLIT', capex: 1_200_000, readyTurn: s.turn + CFG.INSTALL_TURNS });
@@ -2154,7 +2170,7 @@ DECK.life = [
         fx: ['−통장 $22,000', '+본사 신뢰 6'],
         apply: s => { s.cash -= 22_000; s.trust += 6;
           return '3분짜리 영상 만들어서 본사 월례회의에 틀었습니다. 제가 직접 나레이션까지 넣었습니다. '
-               + '이제 아무도 베트남이라고 안 합니다. \k 썼는데 그 값은 했습니다.'; } },
+               + '이제 아무도 베트남이라고 안 합니다. k 썼는데 그 값은 했습니다.'; } },
       { label: '그냥 베트남 법인 한다', hint: '싸우지 않는다',
         fx: ['=변화 없음', '−직원 사기 2'],
         apply: s => { s.morale -= 2;
@@ -3623,10 +3639,17 @@ function cashCard(s, W, run) {
   const ar = s.ar.reduce((a, x) => a + x.amount, 0);
   const opts = [
     { label: '매출채권을 할인해서 당겨 받는다', hint: '수수료를 내고 현금을 산다',
-      fx: [`+현금 약 $${fmt(ar * 0.35 / 1000)}k`, `−수수료 $${fmt(ar * 0.35 * 0.02 / 1000)}k`],
-      apply: (s, G) => { let got = 0;
-        for (const a of s.ar.slice().sort((x, y) => x.dueTurn - y.dueTurn)) { if (got > ar * 0.35) break; got += a.amount; a.amount = 0; }
-        s.ar = s.ar.filter(a => a.amount > 0); s.cash += got * 0.98; styleAdd(W, 'cash');
+      fx: [`+현금 $${money1k(ar * 0.35 * 0.98)}`, `−수수료 $${money1k(ar * 0.35 * 0.02)}`,
+           `=매출채권 $${money1k(ar * 0.35)} 처분`],
+      /* 목표액에 딱 맞춰 넘긴다. 예전에는 목표를 넘길 때까지 통째로 넘겨서
+         화면에 적힌 금액보다 훨씬 큰 돈이 들어왔다 — 화면과 실제가 달랐다. */
+      apply: (s, G) => { const target = ar * 0.35; let got = 0;
+        for (const a of s.ar.slice().sort((x, y) => x.dueTurn - y.dueTurn)) {
+          if (got >= target) break;
+          const take = Math.min(a.amount, target - got);
+          got += take; a.amount -= take;
+        }
+        s.ar = s.ar.filter(a => a.amount > 1e-6); s.cash += got * 0.98; styleAdd(W, 'cash');
         lever(G, '매출채권 할인', { cash: Math.round(got * 0.98) });
         return '채권을 은행에 넘기고 현금을 당겨왔습니다. 수수료만큼 이익이 줄었는데, 이익은 장부에 있고 돈은 통장에 있습니다. 지금 필요한 건 후자입니다.'; } },
     { label: '발주를 절반으로 줄인다', hint: '석 달 뒤를 담보로 지금을 산다',
@@ -3753,11 +3776,14 @@ function overloadCard(s, W, hot) {
         + `반장들 얼굴이 말이 아입니더. 이래 더 가면 둘 중 하납니더 — 사람이 먼저 나가든지, 기계가 먼저 서든지. ` +
         `지는 기계보다 사람이 먼저 갈 거 같습니더.`,
     opts: [
-      { label: '잔업·특근으로 버틴다', hint: '물량을 지킨다', fx: ['+캐파 20%', '−통장 $60,000', '−현장 피로 ↑↑', '−사기 ↓'],
+      /* 특근비는 여기서 바로 빠지지 않는다. 엔진이 이번 달 결산에서 CFG.OT_COST를 문다.
+         그래서 화면 금액도 그 값을 그대로 쓴다 — 예전에는 $60,000이라 적어놓고 $39,000이 나갔다. */
+      { label: '잔업·특근으로 버틴다', hint: '물량을 지킨다',
+        fx: ['+캐파 20%', `−특근비 $${fmt(CFG.OT_COST)} (이번 달 결산에서 차감)`, '−현장 피로 ↑↑', '−사기 ↓'],
         ot: true,
         apply: (s, G) => { W.fatigue = wClamp(W.fatigue + 14); styleAdd(W, 'grow');
           remember(W, s, 'overtime', '잔업으로 버티기');
-          lever(G, '잔업·특근', { fatigue: 14, risk: '설비·품질 부담' });
+          lever(G, '잔업·특근', { fatigue: 14, note: `특근비 $${money1k(CFG.OT_COST)} (결산 반영)`, risk: '설비·품질 부담' });
           return '특근 돌립니더. 이번 달은 버팁니다. 다음 달은 모르겠고예.'; } },
       { label: '외주 가공으로 넘긴다', hint: '남의 손을 빌린다', fx: ['−통장 $95,000', '+현장 숨 돌림', '?품질은 남의 손'],
         apply: (s, G) => { s.cash -= 95_000; W.fatigue = wClamp(W.fatigue - 10); W.quality = wClamp(W.quality - 5);
@@ -4248,9 +4274,9 @@ function bonusCard(s, W) {
         apply: (s, G) => { s.cash -= pool; s.morale = wClamp(s.morale + 10); styleAdd(W, 'craft');
           lever(G, '연말 성과급', { cash: -pool });
           return '나눴습니다. 린 매니저 말로는 현장 반응이 좋다는데, 저는 통장 잔고를 보고 있었습니다.'; } },
-      { label: '기본만', hint: '작년 수준', fx: ['−통장 $60,000', '=사기 그대로'],
+      { label: '기본만', hint: '작년 수준', fx: ['−통장 $39,000', '=사기 그대로'],
         apply: (s, G) => { s.cash -= 39_000;
-          lever(G, '연말 성과급 기본', { cash: -60_000 });
+          lever(G, '연말 성과급 기본', { cash: -39_000 });
           return '작년만큼 줬습니다. 늘지도 줄지도 않았으니 고맙다는 말도 없습니다. 그게 기본급의 운명입니다.'; } },
       { label: '올해는 없다', hint: '현금을 지킨다', fx: ['+현금 지킴', '−직원 사기 ↓↓'],
         apply: (s, G) => { s.morale = wClamp(s.morale - 10); styleAdd(W, 'cash', 2);
@@ -4274,7 +4300,7 @@ function laborCard(s, W) {
       { label: '지금 교대를 조정한다', hint: '선제 대응', fx: ['−이번 달 캐파 5%', '−통장 $20,000', '+피로 ↓'],
         apply: (s, G) => { W.capHit *= 0.95; s.cash -= 20_000; W.fatigue = wClamp(W.fatigue - 15); styleAdd(W, 'craft');
           lever(G, '근로시간 선제 조정', { cash: -20_000, fatigue: -15 });
-          return '교대를 바꾸고 특근을 줄였습니다. 감독관이 "잘 정리돼 있네요" 하고 삼십 분 만에 갔습니다. 그 삼십 분이  k짜리였습니다.'; } },
+          return '교대를 바꾸고 특근을 줄였습니다. 감독관이 "잘 정리돼 있네요" 하고 삼십 분 만에 갔습니다. 그 삼십 분이 $20k짜리였습니다.'; } },
       { label: '서류만 정비한다', hint: '최소한만', fx: ['−통장 $15,000', '?현장이 지쳐 있으면 적발'],
         apply: (s, G) => { s.cash -= 15_000;
           if (W.fatigue > 40 && wChance(0.55)) { s.cash -= 95_000; s.trust = wClamp(s.trust - 3);
@@ -4302,7 +4328,7 @@ function housingCard(s, W) {
       { label: '갱신한다', hint: '주재원 가족이 편하다', fx: ['−고정비 월 $3,500'],
         apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 3_500;
           lever(G, '사택 갱신', { risk: '고정비 월 $3.5k 증가' });
-          return '갱신했습니다. 매달 \k씩, 계약 기간 내내 조용히 나갑니다. 제일 안 아픈 지출이 제일 오래 갑니다.'; } },
+          return '갱신했습니다. 매달 $3.5k씩, 계약 기간 내내 조용히 나갑니다. 제일 안 아픈 지출이 제일 오래 갑니다.'; } },
       { label: '공단 근처 싼 곳으로 옮긴다', hint: '비용을 줄인다', fx: ['−이사비 $25,000', '−주재원 불만'],
         apply: (s, G) => { s.cash -= 25_000; s.morale = wClamp(s.morale - 3); styleAdd(W, 'cash');
           lever(G, '사택 이전', { cash: -25_000 });
@@ -4325,13 +4351,13 @@ function insureCard(s, W) {
       { label: '보장 그대로 갱신', hint: '안전', fx: ['−통장 $55,000'],
         apply: (s, G) => { s.cash -= 55_000; W.insLow = false;
           lever(G, '보험 갱신', { cash: -55_000 });
-          return '그대로 갱신했습니다. 올해 아무 일도 안 일어나면 \k를 버린 셈이 되는데, 그게 제일 좋은 결말입니다.'; } },
+          return '그대로 갱신했습니다. 올해 아무 일도 안 일어나면 $55k를 버린 셈이 되는데, 그게 제일 좋은 결말입니다.'; } },
       { label: '기계 보험을 뺀다', hint: '재고·화재만', fx: ['−통장 $32,000', '?설비 고장 수리비 전액 부담'],
         apply: (s, G) => { s.cash -= 32_000; W.insLow = true; styleAdd(W, 'cash');
           remember(W, s, 'ins-low', '기계 보험 제외');
           lever(G, '기계 보험 제외', { cash: -32_000, risk: '고장 수리비 증가' });
-          return '기계 보험을 뺐습니다. \k 아꼈습니다. 감속기 하나가 \k인 건 알고 계시죠.'; } },
-      { label: '자기부담금을 올린다', hint: '큰 사고만 대비', fx: ['−통장 $26,000', '=작은 사고는 우리 부담'],
+          return '기계 보험을 뺐습니다. $23k 아꼈습니다. 감속기 하나가 $320k인 건 알고 계시죠.'; } },
+      { label: '자기부담금을 올린다', hint: '큰 사고만 대비', fx: ['−통장 $40,000', '=작은 사고는 우리 부담'],
         apply: (s, G) => { s.cash -= 40_000;
           lever(G, '보험 자기부담 상향', { cash: -40_000 });
           return '자기부담금을 올렸습니다. 작은 사고는 우리가 내고 큰 사고만 보험이 냅니다. 작은 사고가 자주 나면 계산이 틀립니다.'; } },
@@ -4346,20 +4372,20 @@ function taxCard(s, W) {
     text: `현지 국세청이 나옵니다. 쟁점은 이전가격입니다. `
         + `쉽게 말해 "본사한테 비싸게 사서 여기 이익을 줄인 것 아니냐"입니다. 저희가 실제로 적자인 게 증거가 될지 변명이 될지는 대응하기 나름입니다.`,
     opts: [
-      { label: '외부 세무법인을 쓴다', hint: '돈으로 막는다', fx: ['−세무법인 $110,000', '+추징까지 합쳐 $110,000로 최소화'],
+      { label: '외부 세무법인을 쓴다', hint: '돈으로 막는다', fx: ['−수수료 $45,000', '−추징 $65,000', '=합계 $110,000'],
         apply: (s, G) => { s.cash -= 110_000;
           lever(G, '세무조사 — 외부 대응', { cash: -110_000 });
-          return '세무법인이 보고서를 냈고 추징은 \k로 끝났습니다. 수수료가 \k니까 아낀 게 맞는지는 각자 판단입니다. 저는 맞다고 봅니다.'; } },
-      { label: '우리끼리 대응한다', hint: '한 부장이 밤을 샌다', fx: ['?추징이 클 수 있다'],
+          return '세무법인이 보고서를 냈고 추징은 $65k로 끝났습니다. 수수료가 $45k니까 아낀 게 맞는지는 각자 판단입니다. 저는 맞다고 봅니다.'; } },
+      { label: '우리끼리 대응한다', hint: '한 부장이 밤을 샌다', fx: ['?잘 되면 추징 $26,000', '?안 되면 추징 $380,000', '확률 반반'],
         apply: (s, G) => { if (wChance(0.5)) { s.cash -= 380_000;
             lever(G, '세무조사 — 자체 대응 실패', { cash: -380_000 });
-            return '논리가 부족했습니다. 추징 \k. 제가 밤을 샌 값이 시간당 마이너스로 찍혔습니다.'; }
+            return '논리가 부족했습니다. 추징 $380k. 제가 밤을 샌 값이 시간당 마이너스로 찍혔습니다.'; }
           s.cash -= 26_000; lever(G, '세무조사 — 자체 대응 성공', { cash: -26_000 });
-          return '자료를 전부 맞춰냈습니다. 추징 \k. 이런 건 두 번은 못 합니다.'; } },
-      { label: '본사 세무팀 지원을 요청한다', hint: '본사에 빚을 진다', fx: ['−본사 신뢰 3', '+추징 적음'],
+          return '자료를 전부 맞춰냈습니다. 추징 $26k. 이런 건 두 번은 못 합니다.'; } },
+      { label: '본사 세무팀 지원을 요청한다', hint: '본사에 빚을 진다', fx: ['−추징 $95,000', '−본사 신뢰 3'],
         apply: (s, G) => { s.trust = wClamp(s.trust - 3); s.cash -= 95_000;
           lever(G, '세무조사 — 본사 지원', { cash: -95_000, trust: -3 });
-          return '본사 세무팀이 붙어서 추징 \k로 막았습니다. 대신 "법인이 준비가 안 돼 있다"는 문장이 본사 보고서에 들어갔습니다. 그 문장은 오래 남습니다.'; } },
+          return '본사 세무팀이 붙어서 추징 $95k로 막았습니다. 대신 "법인이 준비가 안 돼 있다"는 문장이 본사 보고서에 들어갔습니다. 그 문장은 오래 남습니다.'; } },
     ],
   };
 }
@@ -4376,7 +4402,7 @@ function vacancyCard(s, W) {
       { label: '헤드헌터로 경력자를 뽑는다', hint: '빨리, 제대로', fx: ['−통장 $26,000', '+품질 회복', '+조 안정'],
         apply: (s, G) => { s.cash -= 26_000; W.qBoost += 5; W.fatigue = wClamp(W.fatigue - 6); styleAdd(W, 'craft');
           lever(G, '반장 경력 채용', { cash: -26_000, quality: 1 });
-          return '경쟁사 출신을 데려왔습니다. \k 들었고, 그쪽 공정도 같이 들어왔습니다. 그 값은 따로 안 냈습니다.'; } },
+          return '경쟁사 출신을 데려왔습니다. k 들었고, 그쪽 공정도 같이 들어왔습니다. 그 값은 따로 안 냈습니다.'; } },
       { label: '내부에서 승진시킨다', hint: '사람을 키운다', fx: ['+직원 사기 ↑', '=품질 잠시 흔들림'],
         apply: (s, G) => { s.morale = wClamp(s.morale + 5); W.quality = wClamp(W.quality - 2); styleAdd(W, 'craft');
           lever(G, '반장 내부 승진', {});
@@ -4636,13 +4662,18 @@ function deltaChips(a, b) {
 
 /* 효과 칩 — 고르기 전에 뭘 얻고 뭘 잃는지 보인다.
    앞 글자로 색을 정한다. + 이득 / − 손해 / ? 도박 / = 중립 */
+/* 선택지에 붙는 효과 칩.
+   부호를 색으로만 말하면 안 된다 — 색약이거나 흑백으로 보면 +와 −가 같아진다.
+   그래서 기호를 지우지 않고 앞에 그대로 남긴다. */
+const FX_MARK = { '+': '▲', '−': '▼', '-': '▼', '?': '⚠', '=': '=' };
 function fxChips(list) {
   if (!list || !list.length) return '';
-  return `<div class="fx">${list.map(t => {
+  return `<div class="fx">${list.filter(Boolean).map(t => {
     const k = t[0];
-    const cls = k === '+' ? 'up' : k === '−' || k === '-' ? 'dn' : k === '?' ? 'rsk' : 'neu';
-    const body = '+−-?='.includes(k) ? t.slice(1) : t;
-    const mark = k === '?' ? '⚠ ' : '';
+    const known = '+−-?='.includes(k);
+    const cls = k === '+' ? 'up' : (k === '−' || k === '-') ? 'dn' : k === '?' ? 'rsk' : 'neu';
+    const body = known ? t.slice(1) : t;
+    const mark = known ? `<b class="fxm">${FX_MARK[k]}</b> ` : '';
     return `<span class="${cls}">${mark}${body}</span>`;
   }).join('')}</div>`;
 }
@@ -4695,14 +4726,42 @@ function openDecisions() {
     for (const r of rows) vals[r.k] = r.rec;
     const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
 
+    /* 수량을 고칠 때마다 다시 그린다. 부작용 없는 orderForecast로만 계산하므로
+       미리보기가 게임 상태나 난수를 건드리지 않는다. */
     const paint = () => {
       const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
       const totRec = rows.reduce((a, r) => a + r.rec, 0);
       const pct = totRec > 0 ? Math.round(tot / totRec * 100) : 100;
       const box = dlg.querySelector('#osum');
       if (box) box.innerHTML =
-        `<b>합계 ${fmt(Math.round(tot))}톤</b>
-         <span class="${pct > 125 ? 'dn' : pct < 75 ? 'dn' : 'up'}">권장 대비 ${pct}%</span>`;
+        `<b>합계 ${fmt(Math.round(tot))}톤</b>`
+        + (card.months > 1 ? `<span class="sub">월 ${fmt(Math.round(tot / card.months))}톤씩 석 달</span>` : '')
+        + `<span class="${pct > 125 || pct < 75 ? 'dn' : 'up'}">권장 대비 ${pct}%</span>`;
+
+      const f = orderForecast(G.s, rows, vals);
+      const up = orderForecast(G.s, rows, vals, { demand: 1.2 });
+      const late = orderForecast(G.s, rows, vals, { late: 1 });
+      const fc = dlg.querySelector('#ofc');
+      if (!fc) return;
+      const yl = v => v > 1 ? 'dn' : v > 0.85 ? 'warn' : 'up';
+      fc.innerHTML = `
+        <table class="ordt fct">
+          <tr><th>예상</th>${f.rows.map(r => `<th>${dateLabel(r.turn).replace(/^\d+년 /, '')}</th>`).join('')}</tr>
+          <tr><td class="oname">입고</td>${f.rows.map(r => `<td>${r.arrive ? fmt(r.arrive) : '–'}</td>`).join('')}</tr>
+          <tr><td class="oname">월말 재고</td>${f.rows.map(r => `<td class="${r.short ? 'dn' : ''}">${r.short ? '결품' : fmt(r.stock)}</td>`).join('')}</tr>
+          <tr><td class="oname">야드 점유</td>${f.rows.map(r => `<td class="${yl(r.yard)}">${Math.round(r.yard * 100)}%</td>`).join('')}</tr>
+          <tr><td class="oname">재고율(개월)</td>${f.rows.map(r => `<td>${r.coverM.toFixed(1)}</td>`).join('')}</tr>
+        </table>
+        <div class="fcnote">
+          <span class="${f.over ? 'dn' : 'up'}">야드 최대 ${Math.round(f.peakYard * 100)}%${f.over ? ' · 한도 초과' : ''}</span>
+          <span class="${f.shortMonths ? 'dn' : 'up'}">결품 ${f.shortMonths ? f.shortMonths + '개월' : '없음'}</span>
+          <span>소재 대금 ${money(f.cashTie)} · ${CFG.DPO_TURNS}개월 뒤 결제</span>
+        </div>
+        <div class="fcnote alt">
+          <span>수요 +20%면 야드 ${Math.round(up.peakYard * 100)}% · 결품 ${up.shortMonths}개월</span>
+          <span>입고 1개월 지연이면 결품 ${late.shortMonths}개월</span>
+          <span class="est">추정치입니다. 확정 결과가 아닙니다.</span>
+        </div>`;
     };
 
     dlg.innerHTML = `<div class="dlg">${head}
@@ -4714,6 +4773,7 @@ function openDecisions() {
           <tr><th>고객군</th><th>${card.months > 1 ? '분기 사용<br><i>석 달치 · 소재' : '월 사용<br><i>소재'} 기준</i></th>
               <th>창고<br>현물</th><th>해상<br>미착</th>
               <th>본사<br>생산 중</th><th>재고율</th><th>재원율</th>
+              <th class="capby">권장<br>막힌 곳</th>
               <th>${card.months > 1 ? '분기 발주 (톤)' : '발주 (톤)'}</th></tr>
           ${rows.map(r => `<tr>
             <td class="oname">${CUST[r.k]} <i>${CFG.CUSTOMERS[r.k].name}</i></td>
@@ -4723,6 +4783,7 @@ function openDecisions() {
             <td>${fmt(Math.round(r.prod))}</td>
             <td class="${r.invM < COVER.warn ? 'dn' : ''}">${r.invM.toFixed(1)}</td>
             <td>${r.resM.toFixed(1)}</td>
+            <td class="capby">${r.capBy}</td>
             <td><input type="number" min="0" max="${r.max}" step="50" data-ok="${r.k}" value="${r.rec}"></td>
             </tr>`).join('')}
         </table>
@@ -4735,11 +4796,12 @@ function openDecisions() {
             <button class="mini" data-set="1.2">권장 ×1.2</button>
           </div>
         </div>
+        <div id="ofc" class="ofc"></div>
         <p class="hint">고객군별 재고는 판매 비중으로 배분한 추정치입니다. 같은 규격을 여러 고객이 쓰니
           칼같이 갈리지는 않습니다. 지금 걸면 <b>${lead}개월 뒤</b> 야드에 내립니다.<br>
-          본사 압연 스케줄 때문에 ${card.months > 1 ? '분기' : '한 달'} 소요량의 <b>1.6배</b>까지만 걸 수 있습니다 —
-          한 번 바닥나면 금방은 못 메웁니다.
-          ${card.months > 1 ? '<br>적어주신 톤수는 석 달에 나눠서 집행합니다.' : ''}</p>
+          권장량은 <b>소요량 + (목표 재원 − 현재 재원)</b>이고, 본사 압연 한도(${card.months > 1 ? '분기' : '한 달'}
+          소요량의 1.6배)와 <b>야드 여유</b>에 걸리면 거기서 잘립니다. 표의 「막힌 곳」이 무엇이 잘랐는지입니다.
+          ${card.months > 1 ? '<br>적어주신 톤수는 <b>3분의 1씩 세 달에 나눠</b> 집행합니다. 도착도 그만큼 나뉩니다.' : ''}</p>
         <button class="primary" id="osubmit">${card.months > 1 ? '이대로 분기 발주' : '이대로 발주한다'}</button>
       </div>
     </div>`;
@@ -5024,12 +5086,69 @@ function orderRows(s, L) {
        그건 권장량에 반영한다. 사장이 적어낸 숫자에 몰래 곱하면 안 된다 —
        5,000톤이라고 적었는데 8,500톤이 나가면 그건 결재가 아니다. */
     const cardMult = (G && G.mult) || 1;
-    const rec = Math.min(MAX, Math.max(0, ceiling - res),
-      Math.max(0, use + useM * aim - res) * cardMult);
+    /* 야드에 들어갈 자리가 없으면 아무리 필요해도 권장할 수 없다.
+       엔진은 "입고 직후 · 출하 전"의 피크 재고로 야드 정체를 판정한다(engine.js STEP 5b).
+       그래서 월말 재고가 아니라 피크 기준으로 여유를 잡아야 한다 —
+       전에는 이 제약이 아예 없어서 권장량을 그대로 걸면 야드 한도를 2만 톤 넘기고
+       동선이 막혀 가동률이 12% 떨어졌다.
+       정상 상태에서는 "그 기간에 쓸 만큼"만 걸어야 재고가 제자리에 선다. 거기에
+       지금 비어 있는 자리만큼만 더 채울 수 있다. 리드타임 동안 빠져나갈 양을 통째로
+       더해주면(need × lead) 매달 그만큼 과발주가 되어 야드가 계속 넘친다 — 실제로 그랬다. */
+    const yardRoom = use + Math.max(0,
+      CFG.WAREHOUSE_CAP_BASE * 0.90 - onhand - sea) * sh;
+    const base = Math.max(0, use + useM * aim - res) * cardMult;
+    const rec = Math.min(MAX, Math.max(0, ceiling - res), base, yardRoom);
+    // 권장량이 무엇에 막혔는지 화면에 적어준다 — 근거 없는 숫자를 그대로 믿게 하지 않는다
+    const capBy = rec >= base - 1 ? '소요·재원' : rec >= MAX - 1 ? '본사 압연 한도'
+                : rec >= yardRoom - 1 ? '야드 여유' : '재원 천장';
     return { k, sh, use, oh, sea: se, prod: pr, inv, res, max: Math.round(MAX / 50) * 50,
       invM: useM > 0 ? inv / useM : 0, resM: useM > 0 ? res / useM : 0,
+      capBy, yardRoom: Math.round(yardRoom), useM,
       rec: Math.round(rec / 50) * 50 };
   }).filter(r => r.sh > 0.01);
+}
+
+/* 부작용 없는 예측. 발주량을 넣으면 월별로 재고·야드·재원이 어떻게 갈지 돌려준다.
+   상태도 난수도 건드리지 않는다 — 읽기만 한다. 미리보기가 게임을 바꾸면 안 된다. */
+function orderForecast(s, rows, vals, opt = {}) {
+  const mo = orderMonths();
+  const lead = CFG.LEAD_TURNS + CFG.GRADE.PREMIUM.leadAdd;
+  const demandMult = opt.demand ?? 1;      // 수요 증가 시나리오
+  const lateBy = opt.late ?? 0;            // 입고 지연 시나리오 (개월)
+  const tot = rows.reduce((a, r) => a + (vals[r.k] || 0), 0);
+  const perMonth = tot / mo;
+  const useM = rows.reduce((a, r) => a + r.useM, 0) * demandMult;
+
+  /* 예측의 1번째 달 = 지금 결재하고 곧 돌릴 달.
+     엔진은 etaTurn <= turn인 PO를 그 달에 내리므로, etaTurn === s.turn인 배는 1번째 달에 도착한다.
+     같은 이유로 지금 거는 발주는 (lead + 1)번째 달에 내린다. 여기를 한 달 당기면
+     "입고 지연" 시나리오가 오히려 결품이 줄어드는 거꾸로 된 결과가 나온다. */
+  let onhand = inventoryTons(s);
+  const incoming = {};
+  for (const p of s.poOpen) {
+    const m = Math.max(1, p.etaTurn - s.turn + 1) + lateBy;
+    incoming[m] = (incoming[m] || 0) + p.qty;
+  }
+  // 이번에 거는 것 — i번째 달에 perMonth씩 걸고 lead개월 뒤 도착
+  for (let i = 0; i < mo; i++) {
+    const m = i + 1 + lead + lateBy;
+    incoming[m] = (incoming[m] || 0) + perMonth;
+  }
+  const cap = CFG.WAREHOUSE_CAP_BASE;
+  const out = [];
+  for (let m = 1; m <= mo + lead + 1; m++) {
+    onhand = onhand + (incoming[m] || 0) - useM;
+    const short = onhand < 0;
+    if (short) onhand = 0;
+    out.push({ turn: s.turn + m - 1, arrive: Math.round(incoming[m] || 0),
+      stock: Math.round(onhand), yard: onhand / cap, coverM: useM > 0 ? onhand / useM : 0, short });
+  }
+  const peak = Math.max(...out.map(o => o.stock));
+  return { rows: out, tot, perMonth: Math.round(perMonth), peak,
+    peakYard: peak / cap, over: peak > cap,
+    shortMonths: out.filter(o => o.short).length,
+    // 소재 대금은 B/L 90일 조건이라 DPO_TURNS 뒤에 나간다. 그 사이 현금이 묶인다.
+    cashTie: Math.round(tot * s.market.pm) };
 }
 
 function orderCard(s, W, L) {
@@ -5060,6 +5179,10 @@ function orderCard(s, W, L) {
       const rec = rows.reduce((a, r) => a + r.rec, 0);
       G.ui.orderBy = { ...vals };
       G.ui.orderTon = tot;
+      /* 월별 집행 계획. 화면에 "세 달에 나눠서 집행합니다"라고 적었으면 실제로 그렇게 나가야 한다.
+         마지막 달이 반올림 잔차를 받는다 — 합계는 사장이 적어낸 숫자와 정확히 같다. */
+      const per = Math.round(tot / mo / 10) * 10;
+      G.ui.orderPlan = Array.from({ length: mo }, (_, i) => i === mo - 1 ? Math.round(tot - per * (mo - 1)) : per);
       const ratio = rec > 0 ? tot / rec : 1;
       const tag = ratio > 1.25 ? 'overbuy' : ratio < 0.75 ? 'underbuy' : 'normal-buy';
       remember(W, s, tag, `소재 발주 ${fmt(Math.round(tot))}톤 (권장의 ${Math.round(ratio * 100)}%)`);
@@ -5675,7 +5798,8 @@ function expandCard(type, L, s) {
         + `석 달치만 쳐도 ${money(feed)}입니더. 기계는 한 번 사면 끝인데 소재는 매달 들어갑니더.`,
     opts: [
       { label: '짓겠습니다', hint: `${CFG.INSTALL_TURNS}개월 뒤 가동`,
-        fx: [`−설비 ${money(total)}`, `−소재 ${money(feed)} 추가로 묶임`,
+        // 설비 대금은 착공하는 이번 달 결산에서 나간다. 여기서 바로 통장이 줄지 않는다.
+        fx: [`−설비 ${money(total)} (이번 달 결산에서 차감)`, `−소재 ${money(feed)} 추가로 묶임`,
              `+${CFG.INSTALL_TURNS}개월 뒤 캐파 ↑`],
         apply: (st, g) => { g.ui.expandPick = type;
           return `${CFG.LINE[type].label} 발주 넣었심더. ${CFG.INSTALL_TURNS}개월 뒤부터 돕니더. `
@@ -5985,15 +6109,17 @@ function advance() {
     const savedFC = CFG.FC_BASE;
     if (G.extraFixed) CFG.FC_BASE += G.extraFixed;
 
-    /* 증설·본사 지시·고객 영업은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
-       발주와 가동은 석 달 내내 그 방침대로 돈다. */
-    /* 속성 모드는 한 번 결재로 석 달을 돈다.
-       증설·본사 지시·고객군 영업은 분기 첫 달에만 집행한다.
-       소재 발주도 분기 첫 달에 석 달치를 한 장으로 건다 —
-       사장이 적어낸 숫자가 곧 그 분기에 나가는 전부다.
-       나머지 두 달은 0으로 둔다. 자동으로 더 나가면 그건 결재가 아니다. */
-    const ui = i === 0 ? G.ui
-             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, salesMix: null, orderTon: 0 };
+    /* 증설·본사 지시·영업 자원 배분은 한 번 결정한 것이므로 분기 첫 달에만 집행한다.
+
+       소재 발주는 다르다. 사장이 적어낸 건 석 달치이고, 화면에도 "세 달에 나눠서 집행합니다"라고
+       적혀 있다. 그런데 예전에는 첫 달에 석 달치를 통째로 걸었다. 그래서
+         · 한 달에 4만 톤이 한 번에 들어와 야드 한도를 넘겼고
+         · 2·3월엔 발주가 0이라 다음 분기 시작 시점의 해상 미착·본사 생산 중이 전부 0이었다.
+       화면 설명과 실제가 달랐다. 이제 G.ui.orderPlan에 월별 집행량을 담아 그대로 매달 건다. */
+    const plan = G.ui.orderPlan;
+    const monthTon = plan ? (plan[i] ?? 0) : (i === 0 ? G.ui.orderTon : 0);
+    const ui = i === 0 ? { ...G.ui, orderTon: monthTon }
+             : { ...G.ui, expandPick: null, hqTake: 0, custFocus: null, salesMix: null, orderTon: monthTon };
     worldPre(s, G.W);                       // 설비·품질이 이번 달 캐파와 수율을 정한다
     const res = resolveTurn(s, buildDecision(s, ui));
     worldPost(res.state, G.W, res.report, G); // 결과가 설비·관계·피로를 움직이고, 다음 사건을 부른다
@@ -6015,7 +6141,7 @@ function advance() {
 
   G.resultLines = [];
   G.turnDiscount = 0;
-  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null, salesMix: null, orderTon: null, orderBy: null });
+  Object.assign(G.ui, { hqTake: 0, expandPick: null, overtime: false, yieldSpend: 0, salesSpend: 0, custFocus: null, salesMix: null, orderTon: null, orderBy: null, orderPlan: null });
   showReport(mergeReports(reports));
 }
 

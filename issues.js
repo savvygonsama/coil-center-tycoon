@@ -737,10 +737,17 @@ function cashCard(s, W, run) {
   const ar = s.ar.reduce((a, x) => a + x.amount, 0);
   const opts = [
     { label: '매출채권을 할인해서 당겨 받는다', hint: '수수료를 내고 현금을 산다',
-      fx: [`+현금 약 $${fmt(ar * 0.35 / 1000)}k`, `−수수료 $${fmt(ar * 0.35 * 0.02 / 1000)}k`],
-      apply: (s, G) => { let got = 0;
-        for (const a of s.ar.slice().sort((x, y) => x.dueTurn - y.dueTurn)) { if (got > ar * 0.35) break; got += a.amount; a.amount = 0; }
-        s.ar = s.ar.filter(a => a.amount > 0); s.cash += got * 0.98; styleAdd(W, 'cash');
+      fx: [`+현금 $${money1k(ar * 0.35 * 0.98)}`, `−수수료 $${money1k(ar * 0.35 * 0.02)}`,
+           `=매출채권 $${money1k(ar * 0.35)} 처분`],
+      /* 목표액에 딱 맞춰 넘긴다. 예전에는 목표를 넘길 때까지 통째로 넘겨서
+         화면에 적힌 금액보다 훨씬 큰 돈이 들어왔다 — 화면과 실제가 달랐다. */
+      apply: (s, G) => { const target = ar * 0.35; let got = 0;
+        for (const a of s.ar.slice().sort((x, y) => x.dueTurn - y.dueTurn)) {
+          if (got >= target) break;
+          const take = Math.min(a.amount, target - got);
+          got += take; a.amount -= take;
+        }
+        s.ar = s.ar.filter(a => a.amount > 1e-6); s.cash += got * 0.98; styleAdd(W, 'cash');
         lever(G, '매출채권 할인', { cash: Math.round(got * 0.98) });
         return '채권을 은행에 넘기고 현금을 당겨왔습니다. 수수료만큼 이익이 줄었는데, 이익은 장부에 있고 돈은 통장에 있습니다. 지금 필요한 건 후자입니다.'; } },
     { label: '발주를 절반으로 줄인다', hint: '석 달 뒤를 담보로 지금을 산다',
@@ -867,11 +874,14 @@ function overloadCard(s, W, hot) {
         + `반장들 얼굴이 말이 아입니더. 이래 더 가면 둘 중 하납니더 — 사람이 먼저 나가든지, 기계가 먼저 서든지. ` +
         `지는 기계보다 사람이 먼저 갈 거 같습니더.`,
     opts: [
-      { label: '잔업·특근으로 버틴다', hint: '물량을 지킨다', fx: ['+캐파 20%', '−통장 $60,000', '−현장 피로 ↑↑', '−사기 ↓'],
+      /* 특근비는 여기서 바로 빠지지 않는다. 엔진이 이번 달 결산에서 CFG.OT_COST를 문다.
+         그래서 화면 금액도 그 값을 그대로 쓴다 — 예전에는 $60,000이라 적어놓고 $39,000이 나갔다. */
+      { label: '잔업·특근으로 버틴다', hint: '물량을 지킨다',
+        fx: ['+캐파 20%', `−특근비 $${fmt(CFG.OT_COST)} (이번 달 결산에서 차감)`, '−현장 피로 ↑↑', '−사기 ↓'],
         ot: true,
         apply: (s, G) => { W.fatigue = wClamp(W.fatigue + 14); styleAdd(W, 'grow');
           remember(W, s, 'overtime', '잔업으로 버티기');
-          lever(G, '잔업·특근', { fatigue: 14, risk: '설비·품질 부담' });
+          lever(G, '잔업·특근', { fatigue: 14, note: `특근비 $${money1k(CFG.OT_COST)} (결산 반영)`, risk: '설비·품질 부담' });
           return '특근 돌립니더. 이번 달은 버팁니다. 다음 달은 모르겠고예.'; } },
       { label: '외주 가공으로 넘긴다', hint: '남의 손을 빌린다', fx: ['−통장 $95,000', '+현장 숨 돌림', '?품질은 남의 손'],
         apply: (s, G) => { s.cash -= 95_000; W.fatigue = wClamp(W.fatigue - 10); W.quality = wClamp(W.quality - 5);
@@ -1362,9 +1372,9 @@ function bonusCard(s, W) {
         apply: (s, G) => { s.cash -= pool; s.morale = wClamp(s.morale + 10); styleAdd(W, 'craft');
           lever(G, '연말 성과급', { cash: -pool });
           return '나눴습니다. 린 매니저 말로는 현장 반응이 좋다는데, 저는 통장 잔고를 보고 있었습니다.'; } },
-      { label: '기본만', hint: '작년 수준', fx: ['−통장 $60,000', '=사기 그대로'],
+      { label: '기본만', hint: '작년 수준', fx: ['−통장 $39,000', '=사기 그대로'],
         apply: (s, G) => { s.cash -= 39_000;
-          lever(G, '연말 성과급 기본', { cash: -60_000 });
+          lever(G, '연말 성과급 기본', { cash: -39_000 });
           return '작년만큼 줬습니다. 늘지도 줄지도 않았으니 고맙다는 말도 없습니다. 그게 기본급의 운명입니다.'; } },
       { label: '올해는 없다', hint: '현금을 지킨다', fx: ['+현금 지킴', '−직원 사기 ↓↓'],
         apply: (s, G) => { s.morale = wClamp(s.morale - 10); styleAdd(W, 'cash', 2);
@@ -1388,7 +1398,7 @@ function laborCard(s, W) {
       { label: '지금 교대를 조정한다', hint: '선제 대응', fx: ['−이번 달 캐파 5%', '−통장 $20,000', '+피로 ↓'],
         apply: (s, G) => { W.capHit *= 0.95; s.cash -= 20_000; W.fatigue = wClamp(W.fatigue - 15); styleAdd(W, 'craft');
           lever(G, '근로시간 선제 조정', { cash: -20_000, fatigue: -15 });
-          return '교대를 바꾸고 특근을 줄였습니다. 감독관이 "잘 정리돼 있네요" 하고 삼십 분 만에 갔습니다. 그 삼십 분이  k짜리였습니다.'; } },
+          return '교대를 바꾸고 특근을 줄였습니다. 감독관이 "잘 정리돼 있네요" 하고 삼십 분 만에 갔습니다. 그 삼십 분이 $20k짜리였습니다.'; } },
       { label: '서류만 정비한다', hint: '최소한만', fx: ['−통장 $15,000', '?현장이 지쳐 있으면 적발'],
         apply: (s, G) => { s.cash -= 15_000;
           if (W.fatigue > 40 && wChance(0.55)) { s.cash -= 95_000; s.trust = wClamp(s.trust - 3);
@@ -1416,7 +1426,7 @@ function housingCard(s, W) {
       { label: '갱신한다', hint: '주재원 가족이 편하다', fx: ['−고정비 월 $3,500'],
         apply: (s, G) => { G.extraFixed = (G.extraFixed || 0) + 3_500;
           lever(G, '사택 갱신', { risk: '고정비 월 $3.5k 증가' });
-          return '갱신했습니다. 매달 \k씩, 계약 기간 내내 조용히 나갑니다. 제일 안 아픈 지출이 제일 오래 갑니다.'; } },
+          return '갱신했습니다. 매달 $3.5k씩, 계약 기간 내내 조용히 나갑니다. 제일 안 아픈 지출이 제일 오래 갑니다.'; } },
       { label: '공단 근처 싼 곳으로 옮긴다', hint: '비용을 줄인다', fx: ['−이사비 $25,000', '−주재원 불만'],
         apply: (s, G) => { s.cash -= 25_000; s.morale = wClamp(s.morale - 3); styleAdd(W, 'cash');
           lever(G, '사택 이전', { cash: -25_000 });
@@ -1439,13 +1449,13 @@ function insureCard(s, W) {
       { label: '보장 그대로 갱신', hint: '안전', fx: ['−통장 $55,000'],
         apply: (s, G) => { s.cash -= 55_000; W.insLow = false;
           lever(G, '보험 갱신', { cash: -55_000 });
-          return '그대로 갱신했습니다. 올해 아무 일도 안 일어나면 \k를 버린 셈이 되는데, 그게 제일 좋은 결말입니다.'; } },
+          return '그대로 갱신했습니다. 올해 아무 일도 안 일어나면 $55k를 버린 셈이 되는데, 그게 제일 좋은 결말입니다.'; } },
       { label: '기계 보험을 뺀다', hint: '재고·화재만', fx: ['−통장 $32,000', '?설비 고장 수리비 전액 부담'],
         apply: (s, G) => { s.cash -= 32_000; W.insLow = true; styleAdd(W, 'cash');
           remember(W, s, 'ins-low', '기계 보험 제외');
           lever(G, '기계 보험 제외', { cash: -32_000, risk: '고장 수리비 증가' });
-          return '기계 보험을 뺐습니다. \k 아꼈습니다. 감속기 하나가 \k인 건 알고 계시죠.'; } },
-      { label: '자기부담금을 올린다', hint: '큰 사고만 대비', fx: ['−통장 $26,000', '=작은 사고는 우리 부담'],
+          return '기계 보험을 뺐습니다. $23k 아꼈습니다. 감속기 하나가 $320k인 건 알고 계시죠.'; } },
+      { label: '자기부담금을 올린다', hint: '큰 사고만 대비', fx: ['−통장 $40,000', '=작은 사고는 우리 부담'],
         apply: (s, G) => { s.cash -= 40_000;
           lever(G, '보험 자기부담 상향', { cash: -40_000 });
           return '자기부담금을 올렸습니다. 작은 사고는 우리가 내고 큰 사고만 보험이 냅니다. 작은 사고가 자주 나면 계산이 틀립니다.'; } },
@@ -1460,20 +1470,20 @@ function taxCard(s, W) {
     text: `현지 국세청이 나옵니다. 쟁점은 이전가격입니다. `
         + `쉽게 말해 "본사한테 비싸게 사서 여기 이익을 줄인 것 아니냐"입니다. 저희가 실제로 적자인 게 증거가 될지 변명이 될지는 대응하기 나름입니다.`,
     opts: [
-      { label: '외부 세무법인을 쓴다', hint: '돈으로 막는다', fx: ['−세무법인 $110,000', '+추징까지 합쳐 $110,000로 최소화'],
+      { label: '외부 세무법인을 쓴다', hint: '돈으로 막는다', fx: ['−수수료 $45,000', '−추징 $65,000', '=합계 $110,000'],
         apply: (s, G) => { s.cash -= 110_000;
           lever(G, '세무조사 — 외부 대응', { cash: -110_000 });
-          return '세무법인이 보고서를 냈고 추징은 \k로 끝났습니다. 수수료가 \k니까 아낀 게 맞는지는 각자 판단입니다. 저는 맞다고 봅니다.'; } },
-      { label: '우리끼리 대응한다', hint: '한 부장이 밤을 샌다', fx: ['?추징이 클 수 있다'],
+          return '세무법인이 보고서를 냈고 추징은 $65k로 끝났습니다. 수수료가 $45k니까 아낀 게 맞는지는 각자 판단입니다. 저는 맞다고 봅니다.'; } },
+      { label: '우리끼리 대응한다', hint: '한 부장이 밤을 샌다', fx: ['?잘 되면 추징 $26,000', '?안 되면 추징 $380,000', '확률 반반'],
         apply: (s, G) => { if (wChance(0.5)) { s.cash -= 380_000;
             lever(G, '세무조사 — 자체 대응 실패', { cash: -380_000 });
-            return '논리가 부족했습니다. 추징 \k. 제가 밤을 샌 값이 시간당 마이너스로 찍혔습니다.'; }
+            return '논리가 부족했습니다. 추징 $380k. 제가 밤을 샌 값이 시간당 마이너스로 찍혔습니다.'; }
           s.cash -= 26_000; lever(G, '세무조사 — 자체 대응 성공', { cash: -26_000 });
-          return '자료를 전부 맞춰냈습니다. 추징 \k. 이런 건 두 번은 못 합니다.'; } },
-      { label: '본사 세무팀 지원을 요청한다', hint: '본사에 빚을 진다', fx: ['−본사 신뢰 3', '+추징 적음'],
+          return '자료를 전부 맞춰냈습니다. 추징 $26k. 이런 건 두 번은 못 합니다.'; } },
+      { label: '본사 세무팀 지원을 요청한다', hint: '본사에 빚을 진다', fx: ['−추징 $95,000', '−본사 신뢰 3'],
         apply: (s, G) => { s.trust = wClamp(s.trust - 3); s.cash -= 95_000;
           lever(G, '세무조사 — 본사 지원', { cash: -95_000, trust: -3 });
-          return '본사 세무팀이 붙어서 추징 \k로 막았습니다. 대신 "법인이 준비가 안 돼 있다"는 문장이 본사 보고서에 들어갔습니다. 그 문장은 오래 남습니다.'; } },
+          return '본사 세무팀이 붙어서 추징 $95k로 막았습니다. 대신 "법인이 준비가 안 돼 있다"는 문장이 본사 보고서에 들어갔습니다. 그 문장은 오래 남습니다.'; } },
     ],
   };
 }
@@ -1490,7 +1500,7 @@ function vacancyCard(s, W) {
       { label: '헤드헌터로 경력자를 뽑는다', hint: '빨리, 제대로', fx: ['−통장 $26,000', '+품질 회복', '+조 안정'],
         apply: (s, G) => { s.cash -= 26_000; W.qBoost += 5; W.fatigue = wClamp(W.fatigue - 6); styleAdd(W, 'craft');
           lever(G, '반장 경력 채용', { cash: -26_000, quality: 1 });
-          return '경쟁사 출신을 데려왔습니다. \k 들었고, 그쪽 공정도 같이 들어왔습니다. 그 값은 따로 안 냈습니다.'; } },
+          return '경쟁사 출신을 데려왔습니다. k 들었고, 그쪽 공정도 같이 들어왔습니다. 그 값은 따로 안 냈습니다.'; } },
       { label: '내부에서 승진시킨다', hint: '사람을 키운다', fx: ['+직원 사기 ↑', '=품질 잠시 흔들림'],
         apply: (s, G) => { s.morale = wClamp(s.morale + 5); W.quality = wClamp(W.quality - 2); styleAdd(W, 'craft');
           lever(G, '반장 내부 승진', {});
